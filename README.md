@@ -4,4 +4,12 @@
 
 [cmu lab link](http://www.csapp.cs.cmu.edu/3e/labs.html)
 
-
+- data lab [done]
+- bomb lab [done]
+- attack lab 
+- arch lab
+- cache lab
+- perf lab
+- shell lab
+- malloc lab
+- proxy lab

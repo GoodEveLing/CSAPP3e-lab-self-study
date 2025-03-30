@@ -1,5 +1,6 @@
 # 任务需求理解 
 [readme](http://csapp.cs.cmu.edu/3e/README-archlab)
+[write up](http://csapp.cs.cmu.edu/3e/archlab.pdf)
 
 - 目的：理解处理器设计和软硬件之间的联系
 - 任务：设计实现一个Y86-64流水线处理器，提升在ncopy.ys程序上的性能。目标是最小化CPE的时间周期数量
@@ -17,6 +18,13 @@ tar xvf sim.tar
 ```
 cd sim
 make clean; make
+```
+遇到一些编译失败问题
+1. sim/misc/yas.h文件在int lineno 前加上extern
+2. makefile 编译器选项加上-fcommon
+```cmake
+CFLAGS=-Wall -O1 -g -fcommon
+LCFLAGS=-O1 -fcommon
 ```
 # partA
 工作在sim/misc目录下
@@ -49,24 +57,36 @@ long sum_list(list_ptr ls)
   - 循环的汇编表示
   - 存储求和值和返回该值
   - 链表的汇编表示,怎么获取链表的值+怎么跳转链表？
+3. 参考CSAPP3e-lab-self-study/04-archlab-handout/sim/y86-code/asum.ys 里面的结构
+
+- 注意那三个movq的区别，会不会和数据类型有关？
+  - 前缀的表示：立即数(i),寄存器（r）,内存（m）
+- `addq (%rcx), %rax`报错，用另一个寄存器存放（%rdi）后在和rax相加就不报错来，为什么？
+  - OPq只对寄存器操作，（%rcx）表示寄存器取值
+- 为什么在loop前后都有判空的语句？
 
 ```asm
-sum_list:
-   cmovle %r8, $0 # 初始化sum
-   jne rax, 0, isNULL # 判断链表是否为空，如果为空就return,不为空就继续
-    # sum += ls->val
-    # ls = ls->next
-    # 继续循环
-    
-isNULL:
-    ret # exit
+
 ```
+
+```unix
+cd sim/misc
+./yas sum.ys
+./yis sum.yo
+```
+若%rax寄存器值为0xcba则测试通过
 
 ## rsum.ys
 递归版本的sum_list
 - 递归的汇编实现
 
 ## copy.ys
-关键问题：
-1. 指针取值怎么汇编表示？
-2. 异或的汇编表示？
+参考 asum.ys实现
+
+# partB
+拓展SEQ模拟器取支持iaddq,优化seq-full.hcl
+## build and test
+```
+unix> make VERSION=full
+unix> ./ssim -t ../y86-code/asumi.yo
+```

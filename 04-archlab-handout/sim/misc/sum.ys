@@ -1,0 +1,39 @@
+# Execution begins at address 0 
+	.pos 0
+	irmovq stack, %rsp  	# Set up stack pointer
+	call main		# Execute main program
+	halt			# Terminate program 
+
+  .align 8
+ele1:
+  .quad 0x00a
+  .quad ele2
+ele2:
+  .quad 0x0b0
+  .quad ele3
+ele3:
+  .quad 0xc00
+  .quad 0
+
+main:	
+  irmovq ele1,%rdi
+	call sum
+	ret
+
+sum:
+  xorq %rax, %rax # rax = 0, 初始化为0，用来保存sum值，并且是return值所在寄存器
+  andq %rdi,%rdi
+  jne test # 判断链表是否为空，如果为空就return,不为空就继续
+loop:
+  mrmovq (%rdi), %rbx
+  addq %rbx,%rax # sum += ls->val
+  mrmovq 8(%rdi),%rdi # ls = ls->next,
+              # val地址后8字节为下一个节点地址，然后让当前指针指向知道next节点地址
+  andq %rdi,%rdi
+test:
+  ne loop # 继续循环
+  ret # exit
+
+# Stack starts here and grows to lower addresses
+	.pos 0x200
+stack:

