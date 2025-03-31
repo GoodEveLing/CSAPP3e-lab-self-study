@@ -194,17 +194,11 @@ touch3()函数会调用hexmatch(cokkie. sval)函数，在hexmatch中会分配一
 |内容|栈位置|
 |----|----|
 |cookie ascii 码| |
-|----|----|
 |注入代码的位置|返回地址|
-|----|----|
 |。。。。|填充字符|
-|----|----|
 |ret| |
-|----|----|
 |pushq touch3地址| |
-|----|----|
 |rdi = cookie地址|----|
-|----|----|
   
 getbuf退出时：
 1. 执行ret = pop and jmp, 因此从栈中弹出返回地址，跳转到注入代码处
@@ -281,6 +275,36 @@ Breakpoint 1, test () at visible.c:92
 gdb-peda$ p/x $rsp
 $1 = 0x5561dca8
 ```
+---
+最开始我的gdb流程是：
+```
+gdb ctarget
+b test
+p/x $rsp  ==>此时rsp = 0x5561dcb0
+```
+原因是当前还没分配栈空间，刚执行到
+```
+[-------------------------------------code-------------------------------------]
+   0x401959 <touch3+95>:        call   0x401d4f <fail>
+   0x40195e <touch3+100>:       mov    edi,0x0
+   0x401963 <touch3+105>:       call   0x400e40 <exit@plt>
+=> 0x401968 <test>:     sub    rsp,0x8
+   0x40196c <test+4>:   mov    eax,0x0
+   0x401971 <test+9>:   call   0x4017a8 <getbuf>
+   0x401976 <test+14>:  mov    edx,eax
+   0x401978 <test+16>:  mov    esi,0x403188
+[------------------------------------stack-------------------------------------]
+```
+
+所以调整gdb流程：
+```
+gdb ctarget
+b test
+stepi
+p/x $rsp  ==>此时rsp = 0x5561dca8
+```
+当前的rsp才是正确的。
+
 
 ## 注入代码
   
