@@ -15,12 +15,14 @@ make //编译出mdriver可执行文件
 - -V: More verbose output. Prints additional diagnostic information as each trace file is processed. Useful during debugging for determining which trace file is causing your malloc package to fail.
 
 > 官网提供的tar文件中没有trace files, 可以下载本目录trace中的
-> 修改config.h中宏TRACDIR为自己的trace目录地址
+> 修改config.h中宏 `TRACDIR` 为自己实际的trace目录地址
 
 # 准备工作
+修改makefile,保留更多调试信息，方便debug
+```makefile
+CC = gcc -g
+CFLAGS = -Wall -O0 -m32
 ```
-```
-
 
 # 需要考虑的问题
 
@@ -46,7 +48,7 @@ make //编译出mdriver可执行文件
    2. 如果在上一步依然无法满足需求呢？
       1. 请求更多的heap内存，转化为一个大的空闲块
 
-# 隐式空闲链表
+# [v1]隐式空闲链表 + first fit
 描述一个数据块的必要属性：
 - 块大小
 - 状态位：空闲 或 已分配
@@ -58,9 +60,54 @@ make //编译出mdriver可执行文件
 > header(1word) + footer(1word) +payload(1word) = 3word，这个称为有效载荷
 > header高32bit存放size + 3bit(flag), footer低32bit存放数据
 
-其余内容可以看书或blog了解
 
+# [v2]implicit list + next fit
+> 在v1的基础上，调整搜索空闲块的策略：记录上一次空闲块的指针，这样每次搜索空闲块时，从上一次空闲块开始搜索，这样能减少搜索时间
 
+## 需要考虑的问题
+- 上一次空闲块指针初始化
+- 何时更新这个指针
+- 如何更新这个指针
 
+# [v3] explicit free list + LIFO + first fit
+> 在v2的基础上，调整空闲块组织方式：将所有空闲块组成一个链表，一个空闲块的前继节点和后续节点通过header后面的32bit+32bit分别记录，这样只需要修改一个节点的pre_pointer和next_pointer即可修改整个链表。这个改进用于提高find_fit的性能。
+> 另外空闲块搜索采用LIFO策略，新的空闲块插入到链表头部，这样每次搜索空闲块时，从链表头部开始搜索。
 
+数据块的组织结构：
+- 已分配块 = header + payload
+- 空闲块 = header + pre_pointer + next_pointer + payload + footer
 
+## 需要考虑的问题
+- **空闲块链表的初始化**:
+  在mm_init()中初始化空闲链表， 链表头指向空。
+   ```c
+   free_list = NULL;
+   ```
+- **空闲块插入的实现和时机**
+  - 在coalesce()可能会产生新的空闲块，需要插入到空闲链表中。
+  - mm_free()会释放一个块，释放后需要从空闲链表中插入这个块。不过这个函数会调用coalesce()，不用执行插入操作，但是需要更新这个块的pred和succ的情况
+  ```c
+   PUT_PRED(ptr, NULL);
+   PUT_SUCC(ptr, NULL);
+   ```
+- **空闲块被分配后的处理**
+  - 在place()中这个块被分配后，需要从空闲链表中移除，前后节点的指针需要更新。
+  - 同样也是在coalesce()中，如果合并了前后两个块，则需要删除原来的块。
+
+# [v4] segreated list
+> 调整空闲块组织方式：将所有空闲块组成多个链表，按照size大小进行分类，将空闲块插入到合适的链表中。这样在find_fit()中，只需根据size确定要搜索的链表，这样能提高find_fit()的性能。
+> 进一步的可以在搜索这个链表时用best fit
+
+## 需要考虑的问题
+- 多个链表如何划分？
+  - 按照size大小进行划分
+- 多个链表存储在哪里？
+- 如何调整insert和delete函数？
+
+  
+
+# 遇到的问题
+
+```c
+#define GET_SUCC(bp) (*(unsigned int*)(bp + 1))
+```
