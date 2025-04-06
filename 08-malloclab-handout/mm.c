@@ -73,7 +73,9 @@ team_t team = {
 
 static char* heap_listp = 0;
 
-static char* block_list_start = 0;
+#define LIST_NUM 10
+static char* free_listp = 0;
+
 /*
 free bloc = header + pred + succ + payload + footer
 */
@@ -91,49 +93,64 @@ static void* coalesce(void* bp);
 static void* find_fit(size_t asize);
 static void  place(void* bp, size_t asize);
 
-
-static int get_list_index(size_t size)
+int get_index(size_t size)
 {
-
-    if (size <= 32) {
+    if (size <= 16) {
         return 0;
     }
-    else if (size <= 64) {
+    else if (size <= 32) {
         return 1;
     }
-    else if (size <= 128) {
+    else if (size <= 64) {
         return 2;
     }
-    else if (size <= 256) {
+    else if (size <= 128) {
         return 3;
     }
-    else if (size <= 512) {
+    else if (size <= 256) {
         return 4;
     }
-    else if (size <= 1024) {
+    else if (size <= 512) {
         return 5;
     }
-    else if (size <= 2048) {
+    else if (size <= 1024) {
         return 6;
     }
-    else if (size <= 4096) {
+    else if (size <= 2048) {
         return 7;
     }
-    else {
+    else if (size <= 4096) {
         return 8;
     }
+    else {
+        return 9;
+    }
 }
-
-static inline void* get_free_list(int index)
+void* get_free_list(size_t size)
 {
-    return (unsigned int*)(block_list_start + (index * WSIZE));
+    // int i = 0;
+
+    // /* i > 4096 */
+    // if (size >= 4096) return free_listp + (9 * WSIZE);
+
+    // /* i <= 16 */
+    // size = size >> 4;
+
+    // /* other */
+    // while (size) {
+    //     size = size >> 1;
+    //     i++;
+    // }
+
+    int i = get_index(size);
+
+    return (char*)free_listp + (i * WSIZE);
 }
 
 static void insert_free_block(void* bp)
 {
     if (bp == NULL) return;
-
-    void* root = get_free_list(get_list_index(GET_SIZE(HDRP(bp))));
+    void* root = get_free_list(GET_SIZE(HDRP(bp)));
     void* pred = root;
     void* succ = GET(root);
 
@@ -144,59 +161,57 @@ static void insert_free_block(void* bp)
         succ = GET_SUCC(succ);
     }
 
-    /* Luckly! the first succ block bigger than bp block */
-    /* So bp is root and pred of bp is NULL*/
-    if (pred == root) {
-        /* 1. root -> insert, First insert*/
-        PUT(root, bp);
-        PUT_PRED(bp, NULL);
-        PUT_SUCC(bp, succ);
-
-        /* 2. root -> insert -> xxx, First insert and then having free block*/
-        /* if succ != NULL, bp is pred of succ */
-        if (succ != NULL) PUT_PRED(succ, bp);
+    /* Now, SIZE: pred < bp < succ */
+    if (pred == NULL && succ == NULL) {
+        /* NULL -> bp -> NULL */
+        root = bp;
     }
-
-    /* Unluckly! the first succ block smaller than bp block */
-    /* So bp is NOT root and pred of bp EXISTS*/
+    else if (pred != NULL && succ == NULL) {
+        /* pred -> bp -> NULL */
+        PUT_SUCC(pred, bp);
+        PUT_PRED(bp, pred);
+        PUT_SUCC(bp, NULL);
+    }
+    else if (pred == NULL && succ != NULL) {
+        /* NULL->bp->succ */
+        PUT_SUCC(bp, succ);
+        PUT_PRED(succ, bp);
+        PUT_PRED(bp, NULL);
+    }
     else {
-        /* 3. root -> xxx -> insert, Last insert*/
         PUT_PRED(bp, pred);
         PUT_SUCC(bp, succ);
-        PUT_SUCC(pred, bp);
 
-        /* 4. xxx-> insert -> xxx , Middle insert*/
-        /* if succ != NULL, bp is pred of succ*/
-        if (succ != NULL) PUT_PRED(succ, bp);
+        PUT_PRED(succ, bp);
+        PUT_SUCC(pred, bp);
     }
 }
 
 static void delete_alloc_block(void* bp)
 {
-    char* free_listp = get_free_list(get_list_index(GET_SIZE(HDRP(bp))));
-    void* pred       = GET_PRED(bp);
-    void* succ       = GET_SUCC(bp);
+    void* root = get_free_list(GET_SIZE(HDRP(bp)));
+    void* pred = GET_PRED(bp);
+    void* succ = GET_SUCC(bp);
 
     PUT_PRED(bp, NULL);
     PUT_SUCC(bp, NULL);
 
-    if (pred == NULL && succ == NULL) /* NULL-> bp ->NULL */
-    {
-        PUT_SUCC(free_listp, succ);
+    if (pred == NULL) {
+        /* NULL-> bp ->NULL, bp is root */
+        PUT_SUCC(root, succ);
+
+        /* NULL-> bp ->FREE_BLK */
+        if (succ != NULL) {
+            PUT_PRED(succ, NULL);
+            root = succ;
+        }
     }
-    else if (pred == NULL) /* NULL-> bp ->FREE_BLK */
-    {
-        PUT_PRED(succ, NULL); /* as the first block */
-        PUT_SUCC(free_listp, succ);
-    }
-    else if (succ == NULL) /* FREE_BLK-> bp ->NULL */
-    {
+    else {
+        /* FREE_BLK-> bp ->NULL, pred or pred node is root */
         PUT_SUCC(pred, succ);
-    }
-    else /* FREE_BLK-> bp ->FREE_BLK */
-    {
-        PUT_SUCC(pred, succ);
-        PUT_PRED(succ, pred);
+
+        /* FREE_BLK-> bp ->FREE_BLK */
+        if (succ != NULL) PUT_PRED(succ, pred);
     }
 }
 
@@ -206,10 +221,7 @@ static void delete_alloc_block(void* bp)
 int mm_init(void)
 {
     /* creater the initial empty heap */
-    if ((heap_listp = mem_sbrk(13 * WSIZE)) == (void*)-1) return -1;
-
-    block_list_start = heap_listp;
-
+    if ((heap_listp = mem_sbrk(14 * WSIZE)) == (void*)-1) return -1;
     PUT(heap_listp, 0);
     PUT(heap_listp + (1 * WSIZE), 0);
     PUT(heap_listp + (2 * WSIZE), 0);
@@ -219,15 +231,18 @@ int mm_init(void)
     PUT(heap_listp + (6 * WSIZE), 0);
     PUT(heap_listp + (7 * WSIZE), 0);
     PUT(heap_listp + (8 * WSIZE), 0);
+    PUT(heap_listp + (9 * WSIZE), 0);
+    PUT(heap_listp + (10 * WSIZE), 0); /* padding */
 
-    PUT(heap_listp + (9 * WSIZE), PACK(DSIZE, 1));  /* Prologue header 序言头 8/1*/
-    PUT(heap_listp + (10 * WSIZE), PACK(DSIZE, 1)); /* Prologue footer 序言尾 8/1 */
-    PUT(heap_listp + (11 * WSIZE), PACK(0, 1));     /* Epilogue header 结尾头表示堆的结束 0/1 */
+    PUT(heap_listp + (11 * WSIZE), PACK(DSIZE, 1)); /* Prologue header */
+    PUT(heap_listp + (12 * WSIZE), PACK(DSIZE, 1)); /* Prologue footer */
+    PUT(heap_listp + (13 * WSIZE), PACK(0, 1));     /* Epilogue header */
 
-    heap_listp += (10 * WSIZE);
+    free_listp = heap_listp;    /* pointer to block size <= 32 */
+    heap_listp += (12 * WSIZE); /* pointer to Prologue footer */
 
     /* Extend the empty head with a free block of CHUNKSIZE bytes */
-    if (extend_heap(CHUNKSIZE / WSIZE) == NULL) return -1;
+    if (extend_heap(2 * DSIZE / WSIZE) == NULL) return -1;
     return 0;
 }
 
@@ -254,7 +269,7 @@ static void* extend_heap(size_t words)
     PUT_PRED(bp, 0); /* Free block pred */
 
     /* Coalesce if the previous block was free */
-    return coalesce(bp); /* why？ 未扩展前的堆可能以空闲块结尾，合并这两个空闲块，并返回块指针bp*/
+    return coalesce(bp);
 }
 
 /*
@@ -292,10 +307,7 @@ void* mm_malloc(size_t size)
 
 static void* find_fit(size_t asize)
 {
-    /* First-fit search */
-    void* root = get_free_list(get_list_index(asize));
-
-    for (; root != (heap_listp - WSIZE); root += WSIZE) {
+    for (void* root = get_free_list(asize); root != (heap_listp - WSIZE); root += WSIZE) {
         void* bp = GET(root);
         while (bp) {
             if (GET_SIZE(HDRP(bp)) >= asize) return bp;
@@ -322,12 +334,9 @@ static void place(void* bp, size_t asize)
         PUT(FTRP(bp), PACK(asize, 1));
 
         bp = NEXT_BLKP(bp);
-
         PUT(HDRP(bp), PACK(size - asize, 0));
         PUT(FTRP(bp), PACK(size - asize, 0));
-        PUT_PRED(bp, NULL);
-        PUT_SUCC(bp, NULL);
-        coalesce(bp);
+        insert_free_block(bp);
     }
     else {
         /* there must use size but not asize, for alignment */
