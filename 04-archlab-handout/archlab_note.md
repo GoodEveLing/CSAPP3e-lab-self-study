@@ -65,10 +65,6 @@ long sum_list(list_ptr ls)
   - OPq只对寄存器操作，（%rcx）表示寄存器取值
 - 为什么在loop前后都有判空的语句？
 
-```asm
-
-```
-
 ```unix
 cd sim/misc
 ./yas sum.ys
@@ -85,6 +81,11 @@ cd sim/misc
 
 # partB
 拓展SEQ模拟器取支持iaddq,优化seq-full.hcl
+
+```shell
+ssim.c:20:10: fatal error: tk.h: 没有那个文件或目录
+```
+[环境配置](https://blog.csdn.net/altoer/article/details/105116126)
 ## build and test
 ```
 unix> make VERSION=full

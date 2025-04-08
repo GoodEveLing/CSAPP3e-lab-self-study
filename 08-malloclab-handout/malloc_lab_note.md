@@ -96,18 +96,9 @@ CFLAGS = -Wall -O0 -m32
 
 # [v4] segreated list
 > 调整空闲块组织方式：将所有空闲块组成多个链表，按照size大小进行分类，将空闲块插入到合适的链表中。这样在find_fit()中，只需根据size确定要搜索的链表，这样能提高find_fit()的性能。
-> 进一步的可以在搜索这个链表时用best fit
 
 ## 需要考虑的问题
 - 多个链表如何划分？
   - 按照size大小进行划分
 - 多个链表存储在哪里？
 - 如何调整insert和delete函数？
-
-  
-
-# 遇到的问题
-
-```c
-#define GET_SUCC(bp) (*(unsigned int*)(bp + 1))
-```
