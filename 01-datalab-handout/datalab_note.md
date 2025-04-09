@@ -12,7 +12,7 @@ make btest
 ## bitXor
 计算异或值，根据异或的定义相同为0，相异为1得：
 |x|y|xor|
-----
+|----|----|----|
 |0|1|1|
 |1|0|1|
 |0|0|0|
@@ -79,6 +79,7 @@ int isTmax(int x)
 ## addOddBits
 
 看奇数bit位上是否是1
+
 (x & 0xAAAAAAAA) == 0xAAAAAAAA
 
 ```c
@@ -118,20 +119,24 @@ int isAsciiDigit(int x)
 
 ## conditional
 x != 0 返回y, 否则返回z
-重点就是如何将x==0转换为flag = 0xffffffff, x!= 0转换为flag = 0x0
+
+
+**重点就是如何将x==0转换为flag = 0xffffffff, x!= 0转换为flag = 0x0**
 - 首先将这两种情况分开：
 ```c
 int flag = !!x;//x =0,flag = 0, x!=0,flag = 1
 ```
 - 0和1如何变为全0和全1？
+
 return (a & y) | (b & y);
+
  |flag|a|b|
- ----
+ |----|----|----|
  |0|0x0|0xffffffff|
  |1|0xffffffff|0x0|
 
-flag = 0, flag - 1 = ~flag = 0xffffffff
-flag = 1, flag - 1 = 0x0
+- flag = 0, flag - 1 = ~flag = 0xffffffff
+- flag = 1, flag - 1 = 0x0
 
 可以看出: b = flag - 1
 ```c
@@ -155,7 +160,8 @@ int isLessOrEqual(int x, int y)
 }
 ```
 
-**note**
+**note：**
+
 在另一台电脑上这个解法会有溢出的情况，比如：
 - 上溢：一个正数减去一个负数，结果超过Tmax,就会变成负数。
 - 下溢：一个负数减去一个正数，结果小于Tmin，就会变成正数。
@@ -168,8 +174,8 @@ int isLessOrEqual(int x, int y)
 3. x >= 0, y < 0, y - x < 0, return 0
 4. x < 0, y >= 0, y - x >= 0, return 1
 
-1-2情况：signx ^ signy = 0 且 y + (~x + 1) = 0
-3-4情况： signx & !signy
+- 1-2情况：signx ^ signy = 0 且 y + (~x + 1) = 0
+- 3-4情况： signx & !signy
 
 ```c
 int isLessOrEqual(int x, int y)
@@ -206,6 +212,7 @@ int logicalNeg(int x){
 ```
 ## howManyBits
 统计表示这个数需要的最少位数 = 符号位 + 数据位
+
 用二分法：
 ```c
 int howManyBits(int x)
@@ -255,8 +262,7 @@ flowchart TD
 ```
 ## floatScale2
 浮点数乘以2
-分类讨论
-
+**分类讨论**
 ```c
 
 unsigned floatScale2(unsigned uf)
@@ -282,3 +288,101 @@ unsigned floatScale2(unsigned uf)
 
 ```
 ## floatFloat2Int
+还是分类讨论，这里需要了解浮点数的表示原理：
+`f = （-1）^s x (1+M) x 2^E`
+
+`E = exp(23bit) - bias`
+
+搞懂下列问题：
+
+- 为什么尾数要+1？
+- 为什么exp减去bias?
+- 为什么要分为规格数和非规格数？
+- 转换过程为什么尾数要移动23位？
+- 浮点数转整型是向下取整还是向上取整？还是有四舍五入？
+
+```c
+int floatFloat2Int(unsigned uf)
+{
+  // 提取符号位、指数位和尾数位
+  int sign = uf >> 31;
+  int exponent = (uf >> 23) & 0xFF;
+  int mantissa = uf & 0x7FFFFF;
+
+  // 处理特殊情况
+  if (exponent == 0xFF)
+  {
+    // 如果是 NaN 或 infinity，返回最大值或NaN的默认值
+    return 0x80000000u; // 或者其他适当的值
+  }
+
+  if (exponent == 0)
+  {
+    // 非规格化数，直接舍去尾数
+    return 0;
+  }
+
+  // 计算实际值
+  int result;
+  if (exponent >= 127)
+  {
+    // 对应的浮点数的值大于或等于 1
+    int shift = exponent - 127; // 计算需要移位的数量
+    mantissa |= 0x800000;       // 加上隐含的 1
+
+    if (shift > 31)
+      return 0x80000000;
+    if (shift < 0)
+      return 0;
+
+    if (shift >= 23)
+    {
+      // 如果移位数大于 23 位，直接返回溢出后的部分
+      result = mantissa << (shift - 23);
+    }
+    else
+    {
+      // 否则，进行右移
+      result = mantissa >> (23 - shift);
+    }
+  }
+  else
+  {
+    // 对应的浮点数值小于 1，处理为 0
+    result = 0;
+  }
+
+  // 如果符号位为 1，则返回负数
+  return sign ? -result : result;
+}
+```
+
+## floatPower2
+2.0^s = (-1)^0 * (1+0) * 2^x
+
+s = 0; M = 0; x = exp - 127
+
+所以result = x << 23
+
+`If the result is too small to be represented as a denorm, return 0. If too large, return +INF.`
+
+需要考虑这些情况
+
+```c
+unsigned floatPower2(int x)
+{
+  // 2.0^x = (1+0) * 2^x, frac = 0, s = 0, E = x
+  // exp = E + 127 = x + 127, exp 有效范围0x00到 0xFF
+  // 设置指数部分为 x + 127
+  int exponent = (x + 127);
+
+  if (exponent > 0xFF)
+    return 0x7F800000;
+
+  if (exponent < 0)
+    return 0;
+
+  exponent <<= 23;
+  return exponent;
+}
+```
