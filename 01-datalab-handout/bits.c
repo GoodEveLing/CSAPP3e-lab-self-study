@@ -329,9 +329,56 @@ unsigned floatScale2(unsigned uf)
  */
 int floatFloat2Int(unsigned uf)
 {
-    int s    = uf & 0x80000000;
-    int e    = (uf & 0x7f800000) >> 23;
-    int frac = uf & 0x007fffff;
+  // 提取符号位、指数位和尾数位
+  int sign = uf >> 31;
+  int exponent = (uf >> 23) & 0xFF;
+  int mantissa = uf & 0x7FFFFF;
+
+  // 处理特殊情况
+  if (exponent == 0xFF)
+  {
+    // 如果是 NaN 或 infinity，返回最大值或NaN的默认值
+    return 0x80000000u; // 或者其他适当的值
+  }
+
+  if (exponent == 0)
+  {
+    // 非规格化数，直接舍去尾数
+    return 0;
+  }
+
+  // 计算实际值
+  int result;
+  if (exponent >= 127)
+  {
+    // 对应的浮点数的值大于或等于 1
+    int shift = exponent - 127; // 计算需要移位的数量
+    mantissa |= 0x800000;       // 加上隐含的 1
+
+    if (shift > 31)
+      return 0x80000000;
+    if (shift < 0)
+      return 0;
+
+    if (shift >= 23)
+    {
+      // 如果移位数大于 23 位，直接返回溢出后的部分
+      result = mantissa << (shift - 23);
+    }
+    else
+    {
+      // 否则，进行右移
+      result = mantissa >> (23 - shift);
+    }
+  }
+  else
+  {
+    // 对应的浮点数值小于 1，处理为 0
+    result = 0;
+  }
+
+  // 如果符号位为 1，则返回负数
+  return sign ? -result : result;
 }
 /*
  * floatPower2 - Return bit-level equivalent of the expression 2.0^x
@@ -348,5 +395,18 @@ int floatFloat2Int(unsigned uf)
  */
 unsigned floatPower2(int x)
 {
-    return 2;
+  // 2.0^x = (1+0) * 2^x, frac = 0, s = 0, E = x
+  // exp = E + 127 = x + 127, exp 有效范围0x00到 0xFF
+  // 设置指数部分为 x + 127
+  int exponent = (x + 127);
+
+  if (exponent > 0xFF)
+    return 0x7F800000;
+
+  if (exponent < 0)
+    return 0;
+
+  exponent <<= 23;
+  return exponent;
 }
+
