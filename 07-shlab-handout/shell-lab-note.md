@@ -172,13 +172,14 @@ void eval(char* cmdline)
             }
         }
 
+        addjob(jobs, pid, bg ? BG : FG, cmdline); //增加这一句！
+
         /* Parent waits for foreground job to terminate */
         if (!bg) {
             int status;
             if (waitpid(pid, &status, 0) < 0) unix_error("waitfg: waitpid error");
         }
         else {
-            addjob(jobs, pid, bg ? BG : FG, cmdline); //增加这一句！
             printf("%d %s", pid, cmdline);
         }
     }
@@ -218,9 +219,10 @@ tsh> jobs
 
 # trace06.txt ~ trace08.txt
 
-需要发送SIGINT信号给前台信号
+需要转发SIGINT\SIGTSTP信号给fg job, fg job会回收子进程
 
 > When you implement your signal handlers, be sure to send SIGINT and SIGTSTP signals to the entire foreground process group, using ”-pid” instead of ”pid” in the argument to the kill function.
+> 在用kill()发送信号时，如果发送 SIGINT or SIGTSTP, 用`-pid`
 
 ## udpate sigint_handler()
 
@@ -245,25 +247,31 @@ void sigtstp_handler(int sig)
 ## update sigchld_handler()
 这个函数处理接收到SIGSTOP\SIGTSTP信号的，回收所有子进程
 
-### update eval()
+## update eval()
+### 为什么要将子进程添加到别的进程组？
 writeup hint中有一条：
 > When you run your shell from the standard Unix shell, your shell is running in the foreground process
 group. If your shell then creates a child process, by default that child will also be a member of the
 foreground process group. Since typing ctrl-c sends a SIGINT to every process in the foreground
 group, typing ctrl-c will send a SIGINT to your shell, as well as to every process that your shell
 created, which obviously isn’t correct.
+> 
 > 子进程和父进程属于同一个进程组，如果ctrl-c会终止fg进程组下所有进程，包括当前shell运行的进程，这显然是不对的
+> 
 > Here is the workaround: After the `fork`, but before the `execve`, the child process should call
 setpgid(0, 0), which puts the child in a new process group whose group ID is identical to the
 child’s PID. This ensures that there will be only one process, your shell, in the foreground process
 group. When you type ctrl-c, the shell should catch the resulting SIGINT and then forward it
 to the appropriate foreground job (or more precisely, the process group that contains the foreground
 job).
+> 
 > 为了解决上述问题，提出一个workaround方法，将新创建的子进程放入一个新的进程组。确保fg进程组中只有一个进程——your shell。当按下ctrl-c时，shell会捕获生成的SIGINT信号，然后转发它到相应的前台作业（或者更准确地说，包含fg job的进程组。
+> 
 > 实现方法就是在`fork`之后`execve`之前，子进程调用`setpgid(0, 0)`
 
+### 如何避免父进程和子进程并发问题？
 
-
+仔细阅读8.5.6章节内容，描述了一个典型案例
 
 # trace09.txt
 需要实现bg fg命令
