@@ -22,6 +22,7 @@ void sigint_handler(int sig);
 ```unix
 ./test 01 # 测试trace01.txt
 ```
+# 安全处理信号--并发问题
 
 # trace01.txt
 
@@ -43,19 +44,22 @@ unix$ ./test.sh 01
 
 ```
 
-# trace02.txt & trace03.txt
-
-
-需要执行quit内建指令
+# trace02.txt ~ trace04.txt
 
 ## 需要支持的builtin 指令
+
 tsh should support the following built-in commands:
-– The quit command terminates the shell.
-– The jobs command lists all background jobs.
-– The bg <job> command restarts <job> by sending it a SIGCONT signal, and then runs it in
+
+- The quit command terminates the shell.
+
+- The jobs command lists all background jobs.
+
+- The bg <job> command restarts <job> by sending it a SIGCONT signal, and then runs it in
 the background. The <job> argument can be either a PID or a JID.
-– The fg <job> command restarts <job> by sending it a SIGCONT signal, and then runs it in
+
+- The fg <job> command restarts <job> by sending it a SIGCONT signal, and then runs it in
 the foreground. The <job> argument can be either a PID or a JID.
+
 
 ## 完善eval和builtin_cmd函数
 ```c
@@ -138,9 +142,7 @@ tsh> quit
 tsh> quit
 ```
 
-# trace04.txt
-
-在trace03的基础上依然运行通过
+trace04在trace03的基础上依然运行通过
 
 # trace05.txt
 在输入jobs命令会输出jobs列表
@@ -240,7 +242,28 @@ void sigtstp_handler(int sig)
     return;
 }
 ```
-当按下
+## update sigchld_handler()
+这个函数处理接收到SIGSTOP\SIGTSTP信号的，回收所有子进程
+
+### update eval()
+writeup hint中有一条：
+> When you run your shell from the standard Unix shell, your shell is running in the foreground process
+group. If your shell then creates a child process, by default that child will also be a member of the
+foreground process group. Since typing ctrl-c sends a SIGINT to every process in the foreground
+group, typing ctrl-c will send a SIGINT to your shell, as well as to every process that your shell
+created, which obviously isn’t correct.
+> 子进程和父进程属于同一个进程组，如果ctrl-c会终止fg进程组下所有进程，包括当前shell运行的进程，这显然是不对的
+> Here is the workaround: After the `fork`, but before the `execve`, the child process should call
+setpgid(0, 0), which puts the child in a new process group whose group ID is identical to the
+child’s PID. This ensures that there will be only one process, your shell, in the foreground process
+group. When you type ctrl-c, the shell should catch the resulting SIGINT and then forward it
+to the appropriate foreground job (or more precisely, the process group that contains the foreground
+job).
+> 为了解决上述问题，提出一个workaround方法，将新创建的子进程放入一个新的进程组。确保fg进程组中只有一个进程——your shell。当按下ctrl-c时，shell会捕获生成的SIGINT信号，然后转发它到相应的前台作业（或者更准确地说，包含fg job的进程组。
+> 实现方法就是在`fork`之后`execve`之前，子进程调用`setpgid(0, 0)`
+
+
+
 
 # trace09.txt
 需要实现bg fg命令
