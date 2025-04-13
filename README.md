@@ -9,7 +9,6 @@
 - [x] attack lab 
 - [ ] arch lab （partA done）
 - [ ] cache lab
-- [ ] perf lab
-- [ ] shell lab
+- [x] shell lab
 - [x] malloc lab
 - [ ] proxy lab
