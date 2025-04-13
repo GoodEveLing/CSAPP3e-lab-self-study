@@ -136,6 +136,25 @@ void sigchld_handler(int sig)
     return;
 }
 ```
+
+# waitfg()
+
+hint中描述了 waitfg and sigchld handler的写作关系：
+- In waitfg, use a busy loop around the sleep function.
+- In sigchld handler, use exactly one call to waitpid.
+
+这个函数的功能就是循环等待fg job结束
+
+```c
+void waitfg(pid_t pid)
+{
+    while (pid == fgpid(jobs)) {
+        sleep(100);
+    }
+    return;
+}
+```
+
 # update eval()
 
 ## hint
@@ -301,4 +320,23 @@ void do_bgfg(char** argv)
 
     return;
 }
+```
+
+## updatejob()
+
+```c
+int updatejob(struct job_t* jobs, pid_t pid, int state)
+{
+    int i;
+
+    for (i = 0; i < MAXJOBS; i++) {
+        if (jobs[i].pid == pid) {
+            jobs[i].state = state;
+            return 1;
+        }
+    }
+    printf("Job %d not found\n", pid);
+    return 0;
+}
+
 ```
