@@ -5,48 +5,28 @@
 
 一打眼看writeup不明白是干啥的，需要先把书上第8章内容过一遍[important]
 
-需要实现的函数有：
-```c
-/* Here are the functions that you will implement */
-void eval(char* cmdline);
-int  builtin_cmd(char** argv);
-void do_bgfg(char** argv);
-void waitfg(pid_t pid);
+## 需要实现的函数
+- eval: Main routine that parses and interprets the command line. [70 lines]
+- builtin cmd: Recognizes and interprets the built-in commands: quit, fg, bg, and jobs. [25 lines]
+- do bgfg: Implements the bg and fg built-in commands. [50 lines]
+- waitfg: Waits for a foreground job to complete. [20 lines]
+- sigchld handler: Catches SIGCHILD signals. [80 lines]
+- sigint handler: Catches SIGINT (ctrl-c) signals. [15 lines]
+- sigtstp handler: Catches SIGTSTP (ctrl-z) signals. [15 lines]
 
-void sigchld_handler(int sig);
-void sigtstp_handler(int sig);
-void sigint_handler(int sig);
-```
-
-我写了一个test.sh文件，用来同时运行tsh和tshref，方便比较
+## 测试方法
 ```unix
-./test 01 # 测试trace01.txt
-```
-# 安全处理信号--并发问题
-
-# trace01.txt
-
-
-直接运行test.sh，然后查看结果对比
-```unix
-unix$ ./test.sh 01
----------------test tsh-------------
-
-./sdriver.pl -t trace01.txt -s ./tsh -a "-p"
-#
-# trace01.txt - Properly terminate on EOF.
-#
----------------test tshref-------------
-
-#
-# trace01.txt - Properly terminate on EOF.
-#
-
+make test01 # tsh测试trace01.txt
+make rtest01 # tshref测试trace01.txt
 ```
 
-# trace02.txt ~ trace04.txt
+## tsh的功能
+如果第一个word是builtin command,则执行相应的函数；否则，该单词将被认为是可执行程序的路径名。在这种情况下，shell 会创建一个子进程，然后在子进程的上下文环境中加载并运行程序。由于解释一条命令行而创建的子进程统称为一个job。一般来说，一个job可以由多个通过 Unix 管道连接的子进程组成。
 
-## 需要支持的builtin 指令
+如果命令行以符号 “&” 结尾，那么该作业将在后台运行，这意味着 shell 在打印提示符并等待下一条命令行之前，不会等待该作业结束。否则，该作业将在前台运行，这意味着 shell 会等待该作业结束后才会等待下一条命令行。因此，在任何时刻，最多只有一个作业可以在前台运行。不过，在后台可以运行任意数量的作业。
+
+
+# 需要支持的builtin 指令
 
 tsh should support the following built-in commands:
 
@@ -60,39 +40,7 @@ the background. The <job> argument can be either a PID or a JID.
 - The fg <job> command restarts <job> by sending it a SIGCONT signal, and then runs it in
 the foreground. The <job> argument can be either a PID or a JID.
 
-
-## 完善eval和builtin_cmd函数
-```c
-void eval(char* cmdline)
-{
-    char* argv[MAXARGS]; /* Argument list execve() */
-    char  buf[MAXLINE];  /* Holds modified command line */
-    int   bg;            /* Should the job run in bg or fg? */
-    pid_t pid;           /* Process id */
-
-    strcpy(buf, cmdline);
-    bg = parseline(buf, argv);
-    if (argv[0] == NULL) return; /* Ignore empty lines */
-
-    if (!builtin_cmd(argv)) {
-        if ((pid = fork()) == 0) { /* Child runs user job */
-            if (execve(argv[0], argv, environ) < 0) {
-                printf("%s: Command not found.\n", argv[0]);
-                exit(0);
-            }
-        }
-
-        /* Parent waits for foreground job to terminate */
-        if (!bg) {
-            int status;
-            if (waitpid(pid, &status, 0) < 0) unix_error("waitfg: waitpid error");
-        }
-        else
-            printf("%d %s", pid, cmdline);
-    }
-    return;
-}
-```
+## update builtin_cmd()
 
 ```c
 int builtin_cmd(char** argv)
@@ -100,7 +48,7 @@ int builtin_cmd(char** argv)
 
     if (!strcmp(argv[0], "quit")) /* quit command */
         exit(0);
-    else if (!strcmp(argv[0], "bg") || !strcmp(argv[0], "fg")) { /* Ignore singleton & */
+    else if (!strcmp(argv[0], "bg") || !strcmp(argv[0], "fg")) {
         do_bgfg(argv);
         return 1;
     }
@@ -112,113 +60,7 @@ int builtin_cmd(char** argv)
 }
 ```
 
-## 测试结果
-```unix
-unix$ ./test.sh 02
----------------test tsh-------------
-
-./sdriver.pl -t trace02.txt -s ./tsh -a "-p"
-#
-# trace02.txt - Process builtin quit command.
-#
----------------test tshref-------------
-
-#
-# trace02.txt - Process builtin quit command.
-#
-```
-
-```
-./sdriver.pl -t trace03.txt -s ./tsh -a "-p"
-#
-# trace03.txt - Run a foreground job.
-#
-tsh> quit
----------------test tshref-------------
-
-#
-# trace03.txt - Run a foreground job.
-#
-tsh> quit
-```
-
-trace04在trace03的基础上依然运行通过
-
-# trace05.txt
-在输入jobs命令会输出jobs列表
-
-注意到`parseline`函数中， `Return true if the user has requested a BG job, false if the user has requested a FG job.`
-
-所以需要进一步调整eval函数
-## update eval函数
-
-```c
-void eval(char* cmdline)
-{
-    char* argv[MAXARGS]; /* Argument list execve() */
-    char  buf[MAXLINE];  /* Holds modified command line */
-    int   bg;            /* Should the job run in bg or fg? */
-    pid_t pid;           /* Process id */
-
-    strcpy(buf, cmdline);
-    bg = parseline(buf, argv);
-    if (argv[0] == NULL) return; /* Ignore empty lines */
-
-    if (!builtin_cmd(argv)) {
-        if ((pid = fork()) == 0) { /* Child runs user job */
-            if (execve(argv[0], argv, environ) < 0) {
-                printf("%s: Command not found.\n", argv[0]);
-                exit(0);
-            }
-        }
-
-        addjob(jobs, pid, bg ? BG : FG, cmdline); //增加这一句！
-
-        /* Parent waits for foreground job to terminate */
-        if (!bg) {
-            int status;
-            if (waitpid(pid, &status, 0) < 0) unix_error("waitfg: waitpid error");
-        }
-        else {
-            printf("%d %s", pid, cmdline);
-        }
-    }
-    return;
-}
-```
-
-## 测试结果
-
-```unix
----------------test tsh-------------
-
-./sdriver.pl -t trace05.txt -s ./tsh -a "-p"
-#
-# trace05.txt - Process jobs builtin command.
-#
-tsh> ./myspin 2 &
-41012 ./myspin 2 &
-tsh> ./myspin 3 &
-41014 ./myspin 3 &
-tsh> jobs
-[1] (41012) Running ./myspin 2 &
-[2] (41014) Running ./myspin 3 &
----------------test tshref-------------
-
-#
-# trace05.txt - Process jobs builtin command.
-#
-tsh> ./myspin 2 &
-41062 ./myspin 2 &
-tsh> ./myspin 3 &
-41064 ./myspin 3 &
-tsh> jobs
-[1] (41062) Running ./myspin 2 &
-[2] (41064) Running ./myspin 3 &
-```
-
-# trace06.txt ~ trace08.txt
-
+# 转发SIGINT\SIGTSTP信号
 需要转发SIGINT\SIGTSTP信号给fg job, fg job会回收子进程
 
 > When you implement your signal handlers, be sure to send SIGINT and SIGTSTP signals to the entire foreground process group, using ”-pid” instead of ”pid” in the argument to the kill function.
@@ -247,8 +89,60 @@ void sigtstp_handler(int sig)
 ## update sigchld_handler()
 这个函数处理接收到SIGSTOP\SIGTSTP信号的，回收所有子进程
 
-## update eval()
-### 为什么要将子进程添加到别的进程组？
+> 在测试trace过程中调节输出语句，以达到和tshref一样的效果
+
+```c
+void sigchld_handler(int sig)
+{
+    pid_t pid;
+    int   status;
+
+    if (verbose) printf("sigchld_handler: entering \n");
+
+    /*
+     * Reap any zombie jobs.
+     * The WNOHANG here is important. Without it, the
+     * the handler would wait for all running or stopped BG
+     * jobs to terminate, during which time the shell would not
+     * be able to accept input.
+     */
+    while ((pid = waitpid(-1, &status, WNOHANG | WUNTRACED)) > 0) {
+        if (WIFEXITED(status)) {
+            deletejob(jobs, pid);
+        }
+        else if (WIFSIGNALED(status)) {
+            deletejob(jobs, pid);
+
+            printf("Job [%d] (%d) terminated by signal %d\n", pid2jid(pid), pid, WTERMSIG(status));
+        }
+        else if (WIFSTOPPED(status)) {
+            getjobpid(jobs, pid)->state = ST;
+            printf("Job [%d] (%d) stopped by signal %d\n", pid2jid(pid), pid, WSTOPSIG(status));
+        }
+    }
+
+    /*
+     * Check for normal loop termination.
+     * This is a little tricky. For our purposes,
+     * the waitpid loop terminates normally for one of
+     * two reasons: (a) there are no children left
+     * (pid == -1 and errno == ECHILD) or (b) there are
+     * still children left, but none of them are zombies (pid == 0).
+     */
+    if (!((pid == 0) || (pid == -1 && errno == ECHILD))) unix_error("sigchld_handler wait error");
+
+    if (verbose) printf("sigchld_handler: exiting\n");
+
+    return;
+}
+```
+# update eval()
+
+## hint
+In eval, the parent must use sigprocmask to block SIGCHLD signals before it forks the child, and then unblock these signals, again using sigprocmask after it adds the child to the job list bycalling addjob. Since children inherit the blocked vectors of their parents, the child must be sure to then unblock SIGCHLD signals before it execs the new program.
+> 在eval函数中，父进程必须在创建子进程（调用fork）之前使用sigprocmask函数来阻塞SIGCHLD信号，然后在通过调用addjob函数将子进程添加到作业列表之后，再次使用sigprocmask函数来解除对这些信号的阻塞。由于子进程会继承其父进程的阻塞信号集，所以子进程在执行新程序（调用exec）之前，必须确保解除对SIGCHLD信号的阻塞。
+
+## 为什么要将子进程添加到别的进程组？
 writeup hint中有一条：
 > When you run your shell from the standard Unix shell, your shell is running in the foreground process
 group. If your shell then creates a child process, by default that child will also be a member of the
@@ -269,10 +163,142 @@ job).
 > 
 > 实现方法就是在`fork`之后`execve`之前，子进程调用`setpgid(0, 0)`
 
-### 如何避免父进程和子进程并发问题？
+## 如何避免父进程和子进程并发问题？
 
 仔细阅读8.5.6章节内容，描述了一个典型案例
 
-# trace09.txt
-需要实现bg fg命令
+## eval()
+```c
+void eval(char* cmdline)
+{
+    char* argv[MAXARGS]; /* Argument list execve() */
+    char  buf[MAXLINE];  /* Holds modified command line */
+    int   bg;            /* Should the job run in bg or fg? */
+    pid_t pid;           /* Process id */
 
+    strcpy(buf, cmdline);
+    bg = parseline(buf, argv);
+    if (argv[0] == NULL) return; /* Ignore empty lines */
+
+    sigset_t mask_all, mask_one, prev_one;
+    sigfillset(&mask_all);
+    sigemptyset(&mask_one);
+    sigaddset(&mask_one, SIGCHLD);
+
+    if (!builtin_cmd(argv)) {
+        sigprocmask(SIG_BLOCK, &mask_one, &prev_one); /* block SIGCHLD*/
+
+        if ((pid = fork()) == 0) { /* Child runs user job */
+            setpgid(0, 0);         /* set child process to another group */
+            if (execve(argv[0], argv, environ) < 0) {
+                sigprocmask(SIG_SETMASK, &prev_one, NULL); /* Unblock SIGCHLD */
+                printf("%s: Command not found.\n", argv[0]);
+                exit(0);
+            }
+        }
+
+        sigprocmask(SIG_BLOCK, &mask_one, NULL);
+        addjob(jobs, pid, bg ? BG : FG, cmdline);
+        sigprocmask(SIG_SETMASK, &prev_one, NULL);
+        /* Parent waits for foreground job to terminate */
+        if (!bg) {
+            waitfg(pid);
+        }
+        else {
+            printf("%d %s", pid, cmdline);
+        }
+    }
+    return;
+}
+
+```
+
+# do_bgfg()
+需要实现bg fg命令,功能就是restart job
+
+> bg/fg后面输入是job id或者process id,如果是带前缀`%`的，则表示job id，否则表示process id.
+
+问题：
+- 如何唤醒某个job? -- `kill(pid, SIGCONT)`
+- 需要考虑的异常情况？
+  - bg/fg后面的参数判断: 是否为数字，是否为`%`开头的数字，是否为`%`开头的数字且在jobs中存在
+
+## 遇到的问题
+
+1. 判断字符是否是数字？-- `isdigit(char c)`
+2. 字符串转换为数字？-- `atoi(const char *str)`
+
+## update do_bgfg()
+
+```c
+void do_bgfg(char** argv)
+{
+    char*         cmd = argv[0];
+    int           pid;
+    int           jid;
+    struct job_t* jobp;
+
+    if (strcmp(cmd, "bg") && strcmp(cmd, "fg")) return;
+
+    /* ignore command if no argument */
+    if (argv[1] == NULL) {
+        printf("%s command needs PID argument\n", cmd);
+        return;
+    }
+
+    if (argv[1][0] == '%') {
+        if ((argv[1] + 1) == NULL) {
+            printf("%s command required PID or %%jobid argument\n", cmd);
+            return;
+        }
+        if (!isdigit(argv[1][1])) {
+            printf("%s: argument must be a PID or %%jobid\n", cmd);
+            return;
+        }
+        jid = atoi(argv[1] + 1);
+
+        if (jid > maxjid(jobs)) {
+            printf("%%%d: No such job\n", jid);
+            return;
+        }
+
+        jobp = getjobjid(jobs, jid);
+        pid  = jobp->pid;
+    }
+    else {
+        if (argv[1] == NULL) {
+            printf("%s command required PID or %%jobid argument\n", cmd);
+            return;
+        }
+        if (!isdigit(argv[1][0])) {
+            printf("%s: argument must be a PID or %%jobid\n", cmd);
+            return;
+        }
+        pid = atoi(argv[1]);
+        jid = pid2jid(pid);
+        if (jid == 0) {
+            printf("(%d) No such process\n", pid);
+            return;
+        }
+
+        jobp = getjobpid(jobs, pid);
+    }
+
+    if (jobp != NULL) {
+        if (!strcmp(cmd, "bg")) {
+            kill(pid, SIGCONT);
+            updatejob(jobs, pid, BG);
+            printf("[%d] (%d) %s", jid, pid, jobp->cmdline);
+        }
+        if (!strcmp(cmd, "fg")) {
+            kill(pid, SIGCONT);
+            updatejob(jobs, pid, FG);
+            waitfg(pid);
+        }
+    }
+    else
+        printf("Job %d not found\n", pid);
+
+    return;
+}
+```
