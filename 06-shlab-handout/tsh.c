@@ -407,9 +407,8 @@ void sigchld_handler(int sig)
             deletejob(jobs, pid);
         }
         else if (WIFSIGNALED(status)) {
-            deletejob(jobs, pid);
-
             printf("Job [%d] (%d) terminated by signal %d\n", pid2jid(pid), pid, WTERMSIG(status));
+            deletejob(jobs, pid);
         }
         else if (WIFSTOPPED(status)) {
             getjobpid(jobs, pid)->state = ST;
