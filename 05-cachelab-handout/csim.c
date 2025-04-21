@@ -114,7 +114,6 @@ void find_cache_line(uint64_t tag, uint64_t set_index, char* cache_result)
             empty_line = i;
         }
         else if (set->lines[i].tag == tag) {
-            printf("tag = 0x%lx\n", tag);
             strcat(cache_result, "hit ");
             hit_count++;
             update_cache_line(tag, set_index, i);
@@ -126,13 +125,13 @@ void find_cache_line(uint64_t tag, uint64_t set_index, char* cache_result)
     miss_count++;
 
     if (empty_line == -1) {
-        strcat(cache_result, "eviction");
+        strcat(cache_result, "eviction ");
         // empty line not existed
         // all cache line are valid, but no hit. We need to evict one line by LRU.
 
         eviction_count++;
         uint32_t evict_line = 0;
-        uint32_t min_time   = 0;
+        uint32_t min_time   = INT32_MAX;
         for (uint32_t i = 1; i < E; i++) {
             if (min_time > set->lines[i].time_stamp) {
                 evict_line = i;
