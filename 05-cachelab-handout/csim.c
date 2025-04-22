@@ -132,7 +132,7 @@ void find_cache_line(uint64_t tag, uint64_t set_index, char* cache_result)
         eviction_count++;
         uint32_t evict_line = 0;
         uint32_t min_time   = INT32_MAX;
-        for (uint32_t i = 1; i < E; i++) {
+        for (uint32_t i = 0; i < E; i++) {
             if (min_time > set->lines[i].time_stamp) {
                 evict_line = i;
                 min_time   = set->lines[i].time_stamp;
