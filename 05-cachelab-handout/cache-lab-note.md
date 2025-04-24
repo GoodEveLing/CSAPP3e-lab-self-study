@@ -1,13 +1,16 @@
 # 任务需求
+
 - partA: 实现一个cache模拟器
 - partB: 优化一个矩阵转置函数,目标是最小化cache misses数量
 
 # partA: 实现一个cache模拟器
+>
 > 熟读6.3章节
 
 ## 如何测试？
 
 - 测试单个文件
+
 ```unix
 unix> ./csim-ref [-hv] -s <s> -E <E> -b <b> -t <tracefile>
 
@@ -15,12 +18,15 @@ example:
 unix> ./csim -s 1 -E 1 -b 1 -t traces/yi2.trace
 
 ```
+
 - 测试csim-ref和自己的csim
+
 ```unix
 make && ./test-csim
 ```
 
 ## 前置知识
+
 - cache结构
   s：cache set数量=2^s;
   b：单个cache line中data block size=2^b;
@@ -39,90 +45,225 @@ make && ./test-csim
 - cache miss怎么处理?
   - 驱逐算法
   
-
 ## 核心实现
+
 ### 解析命令行输入参数
+>
 > 学习getopt函数的使用（和shell脚本中用法很相似）
 
 ### init_cache
+>
 > 二维数组的初始化
 
 ### 解析trace file
+>
 > 文件打开和读取的使用
 > 按行解析trace file，将trace file中的地址解析成tag,index,block offset
 
 ### find_cache
+>
 > cache miss和hit的判断
 > cache miss的处理
 > LRU算法原理
 
 # partB: 优化一个矩阵转置函数
+>
 > 熟读6.4章节
 > 安装valgrind：`sudo apt-get install valgrind`
 
 ## 性能评估
+
 - 32 × 32: 8 points if m < 300, 0 points if m > 600
 - 64 × 64: 8 points if m < 1, 300, 0 points if m > 2, 000
 - 61 × 67: 10 points if m < 2, 000, 0 points if m > 3, 000
 
 ## 测试方法
+
 ```unix
 linux> make
 linux> ./test-trans -M 32 -N 32
 ```
 
 可以用csim-ref来测试具体的cache misses情况
+
 ```unix
 ./csim-ref -v -s 5 -E 1 -b 5 -t trace.f0 > hitf
 ```
+
 在hitf文件中查看cache访问的情况
 
 ## 使用cache的结构
+
 s = 5， E = 1，b = 5. 所以cache set num = 32 = cache line num，一个cache line只有一个data block,data block size = 32 bytes，total cache data size = 32 * 32 = 1024 bytes
 
-矩阵一个元素占4字节，一个cache line可以存储8个矩阵元素，总共可以存 8 *32 = 256 个元素
+矩阵一个元素占4字节，一个cache line可以存储8个int，总共可以存 8 * 32 = 256个 int元素。
 
 ## 32x32优化思路
+
 测试trans.c中已给的一个example函数trans(),结果是
 `hits:869 misses:1184 evictions:1152`
 
-### 分析原因
+### AB矩阵的地址？
+相邻矩阵元素相差0x4的是A矩阵，相差0x8的是B矩阵。
+hitf文件开始：
 
-- AB矩阵的地址？
+```txt
+S 10c080,1 miss 
+L 18c0c0,8 miss 
+L 18c0a4,4 miss 
+L 18c0a0,4 hit 
+L 10c0a0,4 miss eviction  ==>A
+S 14c0a0,4 miss eviction ==>B
+L 10c0a4,4 miss eviction ==>A
+S 14c120,4 miss ==>B
+L 10c0a8,4 hit 
+S 14c1a0,4 miss 
+L 10c0ac,4 hit 
+S 14c220,4 miss 
+L 10c0b0,4 hit 
+S 14c2a0,4 miss 
+L 10c0b4,4 hit 
+S 14c320,4 miss 
+L 10c0b8,4 hit 
+```
 
-- AB矩阵与cache映射关系？
+所以A矩阵起始位置是0x10c0a0,B矩阵起始位置0x14c0a0，两个矩阵位置相差0x40000.
 
-A矩阵中的元素与cache的映射关系：
+### AB矩阵与cache映射关系
+  
+> note:这里我们不以实际地址分析cache的映射关系，而是用相对地址。假设A[0][0]地址是0x00000，B[0][0]地址0x40000
+
+A矩阵和B矩阵中的元素与cache的映射关系：
+
 |A[0][0]~A[0][7]|A[0][8]~A[0][15]|A[0][16]~A[0][23]|A[0][24]~A[0][31]|
 |----|----|----|----|
 |line0|line1|line2|line3|
+|...|...|...|...|
+|A[7][0]~A[7][7]|A[7][8]~A[7][15]|A[7][16]~A[7][23]|A[7][24]~A[7][31]|
+|line28|line29|line30|line31|
+|...|...|...|...|
+|A[31][0]~A[31][7]|A[31][8]~A[31][15]|A[31][16]~A[31][23]|A[31][24]~A[31][31]|
+|line28|line29|line30|line31|
 
-B矩阵同理。
+**32x32矩阵中每8行的元素会映射到同一个cache line**
 
-A[i][j] = A[i * 32 + j]
-B[j][i] = B[j * 32 + i]
-- cache miss理论计算？
-  - A矩阵按行遍历，遍历第i行时，A[i][0]~A[i][7] 会查看第k个cache line,cache miss后会将A矩阵的元素替换到cache line中。所以每行有32/8 = 4个cache miss, 其余hit，总cache miss数量 = 32 * 4 = 128
+### 对角线位置的缓存冲突不命中？
 
-  - B矩阵按列遍历，遍历第i列时， 每列一开始都会发生cache miss,然后将B矩阵按行取8个元素写入cache line,但是遍历到B[j+1][i]时后面的元素并没有写入缓存，所以还是会cache miss。所以每列有32 cache miss，总cache miss数量 = 32 * 32 = 1024
+进一步地，A和B矩阵元素可以表示为：
 
-  total cache miss数量 = 128 + 1024 = 1152
+```c
+A[i][j] = A[i *32 + j]
+B[j][i] = B[j* 32 + i]
+```
 
-- 为什么实际cache miss数量比理论值要大？
-  - 当i = j时，A[i][j]和B[i][j]会使用同一个cache line，此时会发生cache miss，这叫做冲突不命中，抖动`thrash`--高速缓存反复在A和B的块之间抖动。
-  - 
+同时访问A[i][j]和B[j][i]，两个元素位置相差：
+
+```c
+(base_a + i * 32 + j) - (base_b + j * 32 + i) 
+= (base_a - base_b) + 31(i - j)
+= 0x40000 + 31(i - j)
+
+```
+
+当i - j = 0时，A[i][j]和B[j][i]会映射到同一个cache line。如果两个元素一前一后被访问，会发生冲突不命中，举例说明：
+
+- 读A[0][0], 由于cache invalid, `cache miss`, 然后A[0][0]~A[0][7]会映射到cache line 0；
+- 写B[0][0]时，也会到cache line 0中寻找，`cache miss`后`eviction`前面的data 内容，将B[0][0]~B[0][7]会映射到cache line 0
+- 读A[0][1], 也是到cache line 0寻找，`cache miss`，将A[0][1]~A[0][7]会映射到cache line 0
+- 写B[1][0],到cache line 0中寻找，`cache miss`，将B[1][0]~B[1][7]会映射到cache line 0
+- 读A[0][2],到cache line 0中寻找，`cache hit`
+
+**可以发现在访问A[i][i+1]时会多一次cache miss**
+
+### cache miss=1184理论计算
+  
+  - A矩阵按行遍历，遍历第i行时，A[i][0]~A[i][7] 会寻找第k个cache line,cache miss后会将A矩阵的元素替换到cache line中。所以每行有32/8 = 4个cache miss, 其余hit，总cache miss数量 = 32 * 4 = 128。but注意在上面分析过访问A[i][i+1]时会多一次cache miss, 所以实际上cache miss = 32 * 4 + 32 = 128 + 32 = 160
+
+  - B矩阵按列遍历，遍历第i(i % 8 = 0)列时， 访问B[j][i]都会发生cache miss, 然后将B[j][i]~B[j][i+7]按行取8个元素写入cache line。在分析矩阵和cache line映射关系时已知：访问到B[j + 8 * n][i]时会和B[j][i]映射到同一个cache line，所以当B遍历到i+1行时还是会发生cache miss。因此每列都有32 个cache miss，总cache miss数量 = 32 * 32 = 1024
+
+  total cache miss数量 = 160 + 1024 = 1184
+
 ### 分块优化
-- 重点是减少B矩阵cache miss数量，尽可能使用cache line的B元素
-- 使用局部变量存储A矩阵的元素，减少cache抖动
+
+- 重点是减少B矩阵cache miss数量，尽可能使用cache line中的数据
+- 使用局部变量存储A矩阵的元素，避免对角线cache冲突
 - 按照hints中提到的使用分块技术
   - 分块大小多少比较合适？
-    按照cache line中data block恰好能放8个int，所以分块大小为8 * 8
+    按照cache line中data block恰好能放8个int，以及每隔8行元素会映射同一个cache line,所以分块大小为8 * 8。理论上，这样在访问B[j][i+1]时，不会发生cache miss。
+
+#### 优化1
+```c
+
+void trans_32x32(int M, int N, int A[N][M], int B[M][N])
+{
+    int i, j, ii, jj;
+
+    for (i = 0; i < N; i += 8) {
+        for (j = 0; j < M; j += 8) {
+            for (ii = 0; ii < 8; ii++) {
+                for (jj = 0; jj < 8; jj++) {
+                    int row     = ii + i;
+                    int col     = jj + j;
+                    B[col][row] = A[row][col];
+                }
+            }
+        }
+    }
+}
+```
+
+测试结果：`func 0 (Transpose submission): hits:1709, misses:344, evictions:312`
+
+**分析cache misses = 344**
+
+32x32矩阵别划分为16个8x8的块
+
+- 对于非对角线块，A矩阵遍历每一行会发生一个cache miss, B矩阵遍历第一列会cache miss，第2~8列cache hit。所以非对角线块发生cache miss数量 = (8 + 8) * 12 = 192
+- 对于对角线块，A矩阵和B矩阵访问这个块时每行都有缓存冲突，假设它们访问的都是第一个块，这个块的8行分别映射的是line0,4,8,12,16,20,24,28。
+  - 访问A第一行B第一列：
+    - 当访问A[0][0],cache miss, 将A[0][0]~A[0][7]会映射到cache line 0；
+    - 当访问B[0][0],cache miss eviction, 将B[0][0]~B[0][7]会映射到cache line 0；
+    - 当访问A[0][1],cache miss,eviction，将A[0][1]~A[0][7]会映射到cache line0；
+    - 访问A[0][2]~A[0][7] cache hit; 访问B[1][0]~B[7][0],cache miss,映射到line4,8,12,16,20,24,28；
+  - 访问A第二行B第二列
+    - 当访问A[1][0],cache miss eviction, 将A[1][0]~A[1][7]会映射到cache line 4；
+    - 当访问B[0][1],cache miss eviction, 将B[0][0]~B[0][7]会映射到cache line 0；
+    - 当访问A[1][1],cache hit；
+    - B[1][1], cache miss eviction, 映射到cache line 4；
+    - A[1][2],cache miss eviction
+    - B[2][1]~B[7][1], hit
+
+A block0
+  |col0|col1|col2|col3|col4|col5|col6|col7|
+  |----|----|----|----|----|----|----|----|
+  |miss|miss eviction|hit|hit|hit|hit|hit|hit|
+  |miss eviction|hit|miss eviction|hit|hit|hit|hit|hit|
+  |miss eviction|hit|hit|hit|hit|hit|hit|hit|
+  |miss eviction|hit|hit|hit|hit|hit|hit|hit|
+  |miss eviction|hit|hit|hit|hit|hit|hit|hit|
+  |miss eviction|hit|hit|hit|hit|hit|hit|hit|
+  |miss eviction|hit|hit|hit|hit|hit|hit|hit|
+  |miss eviction|hit|hit|hit|hit|hit|hit|hit|
+
+B block0
+  |col0|col1|col2|col3|col4|col5|col6|col7|
+  |----|----|----|----|----|----|----|----|
+  |miss eviction|miss eviction|hit|hit|hit|hit|hit|hit|
+  |miss|miss eviction|hit|hit|hit|hit|hit|hit|
+  |miss|hit|miss eviction|hit|hit|hit|hit|hit|
+  |miss|hit|hit|miss eviction|hit|hit|hit|hit|
+  |miss|hit|hit|hit|miss eviction|hit|hit|hit|
+  |miss|hit|hit|hit|hit|miss eviction|hit|hit|
+  |miss|hit|hit|hit|hit|hit|miss eviction|hit|
+  |miss|hit|hit|hit|hit|hit|hit|miss eviction|
+
 
 ## 64x64优化思路
 
 ## 61x67优化思路
+
 # 遇到的问题
+
 - index\tag数据类型写太小，导致寻找cache set错误
 - 解析trace file 格式错误，导致解析结果很奇怪
 - 矩阵转置优化好难(哭)
-
