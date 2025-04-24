@@ -177,9 +177,9 @@ B[j][i] = B[j* 32 + i]
 
 ### cache miss=1184理论计算
   
-  - A矩阵按行遍历，遍历第i行时，A[i][0]~A[i][7] 会寻找第k个cache line,cache miss后会将A矩阵的元素替换到cache line中。所以每行有32/8 = 4个cache miss, 其余hit，总cache miss数量 = 32 * 4 = 128。but注意在上面分析过访问A[i][i+1]时会多一次cache miss, 所以实际上cache miss = 32 * 4 + 32 = 128 + 32 = 160
+- A矩阵按行遍历，遍历第i行时，A[i][0]~A[i][7] 会寻找第k个cache line,cache miss后会将A矩阵的元素替换到cache line中。所以每行有32/8 = 4个cache miss, 其余hit，总cache miss数量 = 32 * 4 = 128。but注意在上面分析过访问A[i][i+1]时会多一次cache miss, 所以实际上cache miss = 32 * 4 + 32 = 128 + 32 = 160
 
-  - B矩阵按列遍历，遍历第i(i % 8 = 0)列时， 访问B[j][i]都会发生cache miss, 然后将B[j][i]~B[j][i+7]按行取8个元素写入cache line。在分析矩阵和cache line映射关系时已知：访问到B[j + 8 * n][i]时会和B[j][i]映射到同一个cache line，所以当B遍历到i+1行时还是会发生cache miss。因此每列都有32 个cache miss，总cache miss数量 = 32 * 32 = 1024
+- B矩阵按列遍历，遍历第i(i % 8 = 0)列时， 访问B[j][i]都会发生cache miss, 然后将B[j][i]~B[j][i+7]按行取8个元素写入cache line。在分析矩阵和cache line映射关系时已知：访问到B[j + 8 * n][i]时会和B[j][i]映射到同一个cache line，所以当B遍历到i+1行时还是会发生cache miss。因此每列都有32 个cache miss，总cache miss数量 = 32 * 32 = 1024
 
   total cache miss数量 = 160 + 1024 = 1184
 
@@ -225,37 +225,68 @@ void trans_32x32(int M, int N, int A[N][M], int B[M][N])
     - 当访问B[0][0],cache miss eviction, 将B[0][0]~B[0][7]会映射到cache line 0；
     - 当访问A[0][1],cache miss,eviction，将A[0][1]~A[0][7]会映射到cache line0；
     - 访问A[0][2]~A[0][7] cache hit; 访问B[1][0]~B[7][0],cache miss,映射到line4,8,12,16,20,24,28；
+    - cache misses = A(2miss) + B(8miss) = 10 misses
   - 访问A第二行B第二列
-    - 当访问A[1][0],cache miss eviction, 将A[1][0]~A[1][7]会映射到cache line 4；
-    - 当访问B[0][1],cache miss eviction, 将B[0][0]~B[0][7]会映射到cache line 0；
-    - 当访问A[1][1],cache hit；
-    - B[1][1], cache miss eviction, 映射到cache line 4；
-    - A[1][2],cache miss eviction
+    - 当访问A[1][0],cache miss eviction, 将A[1][0]~A[1][7]会映射到cache line 4；(每行第一元素都会miss)
+    - 当访问B[0][1],cache miss eviction, 将B[0][0]~B[0][7]会映射到cache line 0(将A上一次占据的cache line抢过来，而A已经用不上这个line了)
+    - 当访问A[1][1],cache lint 4 hit；
+    - B[1][1], cache miss eviction, 映射到cache line 4；(对角线冲突)
+    - A[1][2],cache miss eviction；（对角线冲突）
+    - A[1][3]~A[1][7] hit
     - B[2][1]~B[7][1], hit
+    - cache misses = A(2miss) + B(2miss) = 4 misses
+  - 依次类推，10 + 4 x 7 = 38 misses/block
+  - 对角线块发生cache miss数量 = 4 * 38 = 152
+- total misses = 192 + 152 = 344
 
-A block0
-  |col0|col1|col2|col3|col4|col5|col6|col7|
-  |----|----|----|----|----|----|----|----|
-  |miss|miss eviction|hit|hit|hit|hit|hit|hit|
-  |miss eviction|hit|miss eviction|hit|hit|hit|hit|hit|
-  |miss eviction|hit|hit|hit|hit|hit|hit|hit|
-  |miss eviction|hit|hit|hit|hit|hit|hit|hit|
-  |miss eviction|hit|hit|hit|hit|hit|hit|hit|
-  |miss eviction|hit|hit|hit|hit|hit|hit|hit|
-  |miss eviction|hit|hit|hit|hit|hit|hit|hit|
-  |miss eviction|hit|hit|hit|hit|hit|hit|hit|
+#### 优化2
 
-B block0
-  |col0|col1|col2|col3|col4|col5|col6|col7|
-  |----|----|----|----|----|----|----|----|
-  |miss eviction|miss eviction|hit|hit|hit|hit|hit|hit|
-  |miss|miss eviction|hit|hit|hit|hit|hit|hit|
-  |miss|hit|miss eviction|hit|hit|hit|hit|hit|
-  |miss|hit|hit|miss eviction|hit|hit|hit|hit|
-  |miss|hit|hit|hit|miss eviction|hit|hit|hit|
-  |miss|hit|hit|hit|hit|miss eviction|hit|hit|
-  |miss|hit|hit|hit|hit|hit|miss eviction|hit|
-  |miss|hit|hit|hit|hit|hit|hit|miss eviction|
+需要减少对角线冲突，所以需要将A block每行的元素存储在局部变量中
+
+- 对于非对角线块，非对角线块发生cache miss数量 = (8 + 8) * 12 = 192
+- 对于对角线块:
+  - A访问每一行第一个元素都会cache miss
+  - B访问第一列每个元素都会cache miss，访问第n(n>1)列时，只有B[n][n]会cache miss
+  - 对角线块发生cache miss数量 = (9 + 2 x 7) x 4 = 92
+- total misses = 192 + 92 = 284
+
+```c
+void trans_32x32_v2(int M, int N, int A[N][M], int B[M][N])
+{
+    int i, j, k;
+
+    for (i = 0; i < N; i += 8) {
+        for (j = 0; j < M; j += 8) {
+            for (k = 0; k < 8; k++) {
+                int row = i + k;
+
+                int a_0 = A[row][j + 0];
+                int a_1 = A[row][j + 1];
+                int a_2 = A[row][j + 2];
+                int a_3 = A[row][j + 3];
+                int a_4 = A[row][j + 4];
+                int a_5 = A[row][j + 5];
+                int a_6 = A[row][j + 6];
+                int a_7 = A[row][j + 7];
+
+                B[j + 0][row] = a_0;
+                B[j + 1][row] = a_1;
+                B[j + 2][row] = a_2;
+                B[j + 3][row] = a_3;
+                B[j + 4][row] = a_4;
+                B[j + 5][row] = a_5;
+                B[j + 6][row] = a_6;
+                B[j + 7][row] = a_7;
+            }
+        }
+    }
+}
+```
+
+`func 0 (Transpose submission): hits:1765, misses:288, evictions:256`
+
+
+
 
 
 ## 64x64优化思路

@@ -29,6 +29,37 @@ void trans_32x32(int M, int N, int A[N][M], int B[M][N])
     }
 }
 
+void trans_32x32_v2(int M, int N, int A[N][M], int B[M][N])
+{
+    int i, j, k;
+
+    for (i = 0; i < N; i += 8) {
+        for (j = 0; j < M; j += 8) {
+            for (k = 0; k < 8; k++) {
+                int row = i + k;
+
+                int a_0 = A[row][j + 0];
+                int a_1 = A[row][j + 1];
+                int a_2 = A[row][j + 2];
+                int a_3 = A[row][j + 3];
+                int a_4 = A[row][j + 4];
+                int a_5 = A[row][j + 5];
+                int a_6 = A[row][j + 6];
+                int a_7 = A[row][j + 7];
+
+                B[j + 0][row] = a_0;
+                B[j + 1][row] = a_1;
+                B[j + 2][row] = a_2;
+                B[j + 3][row] = a_3;
+                B[j + 4][row] = a_4;
+                B[j + 5][row] = a_5;
+                B[j + 6][row] = a_6;
+                B[j + 7][row] = a_7;
+            }
+        }
+    }
+}
+
 /*
  * transpose_submit - This is the solution transpose function that you
  *     will be graded on for Part B of the assignment. Do not change
@@ -40,7 +71,7 @@ char transpose_submit_desc[] = "Transpose submission";
 void transpose_submit(int M, int N, int A[N][M], int B[M][N])
 {
     if (M == 32 && N == 32) {
-        trans_32x32(M, N, A, B);
+        trans_32x32_v2(M, N, A, B);
     }
 }
 
