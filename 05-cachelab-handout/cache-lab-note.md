@@ -166,15 +166,24 @@ B[j][i] = B[j* 32 + i]
 ```
 
 当i - j = 0时，A[i][j]和B[j][i]会映射到同一个cache line。如果两个元素一前一后被访问，会发生冲突不命中，举例说明：
+- 访问A第一行B第一列：
+  - 读A[0][0], 由于cache invalid, `cache miss`, A[0][0]~A[0][7]会映射到cache line 0；
+  - 写B[0][0]时，`cache miss`后`eviction`前面的data 内容，将B[0][0]~B[0][7]映射到cache line 0
+  - 读A[0][1], 也是到cache line 0寻找，`cache miss eviction`，将A[0][1]~A[0][7]会映射到cache line 0
+  - 写B[1][0],到cache line 4中寻找，`cache miss`，将B[1][0]~B[1][7]会映射到cache line 4
+  - 读A[0][2]~A[0][7],到cache line 0中寻找，`cache hit`
+  - 写B[2][0]~B[7][0], `cache miss`
 
-- 读A[0][0], 由于cache invalid, `cache miss`, 然后A[0][0]~A[0][7]会映射到cache line 0；
-- 写B[0][0]时，也会到cache line 0中寻找，`cache miss`后`eviction`前面的data 内容，将B[0][0]~B[0][7]映射到cache line 0
-- 读A[0][1], 也是到cache line 0寻找，`cache miss eviction`，将A[0][1]~A[0][7]会映射到cache line 0
-- 写B[1][0],到cache line 4中寻找，`cache miss`，将B[1][0]~B[1][7]会映射到cache line 4
-- 读A[0][2]~A[0][7],到cache line 0中寻找，`cache hit`
-- 写B[2][0]~B[7][0], `cache miss`
+- 访问A第二行B第二列
+  - 读[1][0],`cache miss eviction`, 将A[1][0]~A[1][7]会映射到cache line 4；(每行第一个元素都会miss)
+  - 写B[0][1],`cache miss eviction`, 将B[0][0]~B[0][7]会映射到cache line 0(将A上一次占据的cache line抢过来，而A已经用不上这个line了)
+  - 读A[1][1],`cache line 4 hit`；
+  - 写B[1][1], `cache miss eviction`, 映射到cache line 4；(对角线冲突)
+  - 读A[1][2],`cache miss eviction`；（对角线冲突）
+  - 读A[1][3]~A[1][7] hit
+  - 写B[2][1]~B[7][1], hit
 
-**可以发现在访问A[i][i+1]时会多一次cache miss eviction**
+**可以发现在访问A[i][i+1]时会多一次cache miss eviction, 访问B[i][i]和B[i -1][i]也会有cache miss eviction**
 
 ### cache miss=1183理论计算
   
@@ -221,24 +230,13 @@ void trans_32x32(int M, int N, int A[N][M], int B[M][N])
 
 - 对于非对角线块，A矩阵遍历每一行会发生一个cache miss, B矩阵遍历第一列会cache miss，第2~8列cache hit。所以非对角线块发生cache miss数量 = (8 + 8) * 12 = 192
 - 对于对角线块，A矩阵和B矩阵访问这个块时每行都有缓存冲突，假设它们访问的都是第一个块，这个块的8行分别映射的是line0,4,8,12,16,20,24,28。
-  - 访问A第一行B第一列：
-    - 当访问A[0][0],cache miss, 将A[0][0]~A[0][7]会映射到cache line 0；
-    - 当访问B[0][0],cache miss eviction, 将B[0][0]~B[0][7]会映射到cache line 0；
-    - 当访问A[0][1],cache miss,eviction，将A[0][1]~A[0][7]会映射到cache line0；
-    - 访问A[0][2]~A[0][7] cache hit; 访问B[1][0]~B[7][0],cache miss,映射到line4,8,12,16,20,24,28；
-    - cache misses = A(2miss) + B(8miss) = 10 misses
-  - 访问A第二行B第二列
-    - 当访问A[1][0],cache miss eviction, 将A[1][0]~A[1][7]会映射到cache line 4；(每行第一个元素都会miss)
-    - 当访问B[0][1],cache miss eviction, 将B[0][0]~B[0][7]会映射到cache line 0(将A上一次占据的cache line抢过来，而A已经用不上这个line了)
-    - 当访问A[1][1],cache lint 4 hit；
-    - B[1][1], cache miss eviction, 映射到cache line 4；(对角线冲突)
-    - A[1][2],cache miss eviction；（对角线冲突）
-    - A[1][3]~A[1][7] hit
-    - B[2][1]~B[7][1], hit
-    - cache misses = A(2miss/row) + B(2miss/col) = 4 misses
-  - 依次类推，10 + 4 x 7 = 38 misses/block
-  - 对角线块发生cache miss数量 = 4 * 38 = 152
-- total misses = 192 + 152 = 344
+  - 在上面分析过访问A[i][i+1]时会多一次cache miss, 在一个8*8 block中，A由于对角线冲突导致的总cache miss = 8(每行一开始的cache miss) + 7(对角线冲突）= 15 misses/block
+  - B访问每个block的第一列元素都会cache miss, 加上对角线冲突，B[i][i]和B[i-1][i]会cache miss。因此B由于对角线冲突导致的总cache miss = 8(写B[i][x]) + 7(B[i][i]except 第一个元素) + 7(B[i-1][i]) = 22 misses/block
+  - 依次类推，15 + 22 = 37 misses/block
+  - 对角线块发生cache miss数量 = 4 * 37 = 148
+- total misses = 192 + 148 = 340
+
+多出来的 4 次是其他调用的开销、固定支出。
 
 #### 优化2
 
@@ -251,7 +249,7 @@ void trans_32x32(int M, int N, int A[N][M], int B[M][N])
   - 对角线块发生cache miss数量 = (9 + 2 x 7) x 4 = 92
 - total misses = 192 + 92 = 284
 
-从附录hitf文件中可以进一步验证猜想。不过我没弄懂一头一尾的3个miss是怎么来的
+从附录hitf文件中可以进一步验证猜想。多出来的4次或者3次miss是其他调用的开销、固定支出。
 
 ```txt
 S 18d08c,1 miss 
