@@ -104,6 +104,7 @@ s = 5， E = 1，b = 5. 所以cache set num = 32 = cache line num，一个cache 
 `hits:869 misses:1184 evictions:1152`
 
 ### AB矩阵的地址？
+
 相邻矩阵元素相差0x4的是A矩阵，相差0x8的是B矩阵。
 hitf文件开始：
 
@@ -166,6 +167,7 @@ B[j][i] = B[j* 32 + i]
 ```
 
 当i - j = 0时，A[i][j]和B[j][i]会映射到同一个cache line。如果两个元素一前一后被访问，会发生冲突不命中，举例说明：
+
 - 访问A第一行B第一列：
   - 读A[0][0], 由于cache invalid, `cache miss`, A[0][0]~A[0][7]会映射到cache line 0；
   - 写B[0][0]时，`cache miss`后`eviction`前面的data 内容，将B[0][0]~B[0][7]映射到cache line 0
@@ -187,9 +189,9 @@ B[j][i] = B[j* 32 + i]
 
 ### cache miss=1183理论计算
   
-- A矩阵按行遍历，遍历第i行时，A[i][0]~A[i][7] 会寻找第k个cache line,`cache miss`后会将A[i][0]~A[i][7] 换到cache line中。所以每行有32/8 = 4 cache miss/row, 其余hit，总cache miss数量 = 32 row * 4 miss/row= 128 misses。but注意在上面分析过访问A[i][i+1]时会多一次cache miss, 所以实际上cache miss = 32 * 4 + 31 = 128 + 31 = 159
+- A矩阵按行遍历，遍历第i行时，A[i][0]~A[i][7] 会寻找第k个cache line,`cache miss`后会将A[i][0]~A[i][7] 换到cache line中。所以每行有32/8 = 4 cache miss/row, 其余hit，总cache miss数量 = 32 row *4 miss/row= 128 misses。but注意在上面分析过访问A[i][i+1]时会多一次cache miss, 所以实际上cache miss = 32* 4 + 31 = 128 + 31 = 159
 
-- B矩阵按列遍历，遍历第i(i % 8 = 0)列时， 访问B[j][i]都会发生cache miss, 然后将B[j][i]~B[j][i+7]按行取8个元素写入cache line。在分析矩阵和cache line映射关系时已知：访问到B[j + 8 * n][i]时会和B[j][i]映射到同一个cache line，所以当B遍历到i+1行时还是会发生cache miss。因此每列都有32 个cache miss，总cache miss数量 = 32 * 32 = 1024
+- B矩阵按列遍历，遍历第i(i % 8 = 0)列时， 访问B[j][i]都会发生cache miss, 然后将B[j][i]~B[j][i+7]按行取8个元素写入cache line。在分析矩阵和cache line映射关系时已知：访问到B[j + 8 *n][i]时会和B[j][i]映射到同一个cache line，所以当B遍历到i+1行时还是会发生cache miss。因此每列都有32 个cache miss，总cache miss数量 = 32* 32 = 1024
 
   total cache miss数量 = 159 + 1024 = 1183
 
@@ -202,6 +204,7 @@ B[j][i] = B[j* 32 + i]
     按照cache line中data block恰好能放8个int，以及每隔8行元素会映射同一个cache line,所以分块大小为8 * 8。理论上，这样在访问B[j][i+1]时，不会发生cache miss。
 
 #### 优化1
+
 ```c
 
 void trans_32x32(int M, int N, int A[N][M], int B[M][N])
@@ -228,15 +231,15 @@ void trans_32x32(int M, int N, int A[N][M], int B[M][N])
 
 32x32矩阵别划分为16个8x8的块
 
-- 对于非对角线块，A矩阵遍历每一行会发生一个cache miss, B矩阵遍历第一列会cache miss，第2~8列cache hit。所以非对角线块发生cache miss数量 = (8 + 8) * 12 = 192
-- 对于对角线块，A矩阵和B矩阵访问这个块时每行都有缓存冲突，假设它们访问的都是第一个块，这个块的8行分别映射的是line0,4,8,12,16,20,24,28。
-  - 在上面分析过访问A[i][i+1]时会多一次cache miss, 在一个8*8 block中，A由于对角线冲突导致的总cache miss = 8(每行一开始的cache miss) + 7(对角线冲突）= 15 misses/block
+- 对于`非对角线块`，A矩阵遍历每一行会发生一个cache miss, B矩阵遍历第一列会cache miss，第2~8列cache hit。所以非对角线块发生cache miss数量 = (8 + 8) * 12 = 192
+- 对于`对角线块`，A矩阵和B矩阵访问这个块时每行都有缓存冲突，假设它们访问的都是第一个块，这个块的8行分别映射的是line0,4,8,12,16,20,24,28。
+  - 在上面分析过访问A[i][i+1]时会多一次cache miss, 在一个8*8 block中，A由于对角线冲突导致的总cache miss = 8(每行一开始的cache miss) + 7(对角线冲突)= 15 misses/block
   - B访问每个block的第一列元素都会cache miss, 加上对角线冲突，B[i][i]和B[i-1][i]会cache miss。因此B由于对角线冲突导致的总cache miss = 8(写B[i][x]) + 7(B[i][i]except 第一个元素) + 7(B[i-1][i]) = 22 misses/block
   - 依次类推，15 + 22 = 37 misses/block
   - 对角线块发生cache miss数量 = 4 * 37 = 148
 - total misses = 192 + 148 = 340
 
-多出来的 4 次是其他调用的开销、固定支出。
+> 多出来的 4 次是其他调用的开销、固定支出。
 
 #### 优化2
 
@@ -295,17 +298,275 @@ void trans_32x32_v2(int M, int N, int A[N][M], int B[M][N])
 
 ## 64x64优化思路
 
+64x64矩阵如果被分割为8x8block,一共64个block，还用上述的优化方式，前8行对应的cache映射关系：
+
+|.|8int|8int|8int|8int|8int|8int|8int|8int|
+|----|----|----|----|----|----|----|----|----|
+|row0|line 0|line 1|line 2|line 3|line 4|line 5|line 6|line 7|
+|row1|line 8|line 9|line 10|line 11|line 12|line 13|line 14|line 15|
+|row2|line 16|line 17|line 18|line 19|line 20|line 21|line 22|line 23|
+|row3|line 24|line 25|line 26|line 27|line 28|line 29|line 30|line 31|
+|row4|line 0|line 1|line 2|line 3|line 4|line 5|line 6|line 7|
+|row5|line 8|line 9|line 10|line 11|line 12|line 13|line 14|line 15|
+|row6|line 16|line 17|line 18|line 19|line 20|line 21|line 22|line 23|
+|row7|line 24|line 25|line 26|line 27|line 28|line 29|line 30|line 31|
+
+重复上面的cache映射关系x8
+
+### 理论分析8x8cache miss
+
+用32x32优化2测试64 x 64 矩阵，结果如下：
+`func 0 (Transpose submission): hits:3585, misses:4612, evictions:4580`
+
+- 在32x32优化2方式中，B矩阵按列遍历时，一个block中访问每一行映射的都是不同的cacheline，而现在row4~row7与row0~row3的cacheline是同一个cacheline，所以B矩阵的访问会反复的cache trash(抖动)。B矩阵cache miss数量 = 8 x 8 x 64  = 4096.
+- A矩阵按照优化2的计算结果，cache miss = 8 x 64 = 512
+- total cache miss = 4096 + 512 = 4608. 加上4个系统调用开销，总cache miss = 4608 + 4 = 4612
+
+### 优化1
+
+从上述分析过程，有以下优化思路：
+
+- A cache miss数量不受影响，主要是B矩阵的cache 抖动占大部分原因。如何优化？
+  - B遍历block不能8行遍历，前4行存到cache line中的数据要在写后四行之前就使用。可是读到A一行8个元素时，需要写到B的列中，如果不写后4行可以放在哪里呢？临时变量个数限制了不能全部放局部变量，不妨放到B[j][i + 4]中，不会造成多的cache miss.  
+  - 接下来A3 A4怎么搬到B中呢？临时变量暂存A2_t, 读A3写入B2，B2中原本存放的A2_t要写入B3. 最后搬运A4到B4中。
+  
+  按照上述的优化思路得到的数据分布情况：
+
+  A block按4 x 4分块：
+
+  |A1|A2|
+  |----|----|
+  |A3|A4|
+
+  期望得到的B block如下,Ax_t是Ax的转置矩阵（感觉有点像行列式呢）
+
+  |A1_t|A3_t|
+  |----|----|
+  |A2_t|A4_t|
+
+  在上述优化后，B矩阵的存储变化为：
+
+  |A1_t|A2_t|
+  |----|----|
+  |NULL|NULL|
+
+  |A1_t|A3_t|
+  |----|----|
+  |A2_t|A4_t|
+
+  |A1_t|A2_t|
+  |----|----|
+  |A3_t|A4_t|
+
+在exchange A2_t和A3_t会有cache冲突
+
+```c
+void trans_64x64_v1(int M, int N, int A[N][M], int B[M][N])
+{
+    int i, j, k;
+    for (i = 0; i < 64; i += 8) {
+        for (j = 0; j < 64; j += 8) {
+            for (k = 0; k < 4; k++) {
+                int row = i + k;
+
+                int a_0 = A[row][j + 0];
+                int a_1 = A[row][j + 1];
+                int a_2 = A[row][j + 2];
+                int a_3 = A[row][j + 3];
+                int a_4 = A[row][j + 4];
+                int a_5 = A[row][j + 5];
+                int a_6 = A[row][j + 6];
+                int a_7 = A[row][j + 7];
+
+                // B 1 = A1_t
+                B[j + 0][row] = a_0;
+                B[j + 1][row] = a_1;
+                B[j + 2][row] = a_2;
+                B[j + 3][row] = a_3;
+                // B2 = A2_t
+                B[j + 0][row + 4] = a_4;
+                B[j + 1][row + 4] = a_5;
+                B[j + 2][row + 4] = a_6;
+                B[j + 3][row + 4] = a_7;
+            }
+
+            for (k = 0; k < 4; k++) {
+                int row = i + k;
+
+                int a_0 = A[row + 4][j + 0];
+                int a_1 = A[row + 4][j + 1];
+                int a_2 = A[row + 4][j + 2];
+                int a_3 = A[row + 4][j + 3];
+                int a_4 = A[row + 4][j + 4];
+                int a_5 = A[row + 4][j + 5];
+                int a_6 = A[row + 4][j + 6];
+                int a_7 = A[row + 4][j + 7];
+
+                // B3 = A3_t
+                B[j + 4][row] = a_0;
+                B[j + 5][row] = a_1;
+                B[j + 6][row] = a_2;
+                B[j + 7][row] = a_3;
+                // B4 = A4_t
+                B[j + 4][row + 4] = a_4;
+                B[j + 5][row + 4] = a_5;
+                B[j + 6][row + 4] = a_6;
+                B[j + 7][row + 4] = a_7;
+            }
+
+            for (k = 0; k < 4; k++) {
+                int row = j + k;
+
+                // B2 = A2_t
+                int a_0 = B[row][i + 4];
+                int a_1 = B[row][i + 5];
+                int a_2 = B[row][i + 6];
+                int a_3 = B[row][i + 7];
+
+                // B3 = A3_t
+                int a_4 = B[row + 4][i + 0];
+                int a_5 = B[row + 4][i + 1];
+                int a_6 = B[row + 4][i + 2];
+                int a_7 = B[row + 4][i + 3];
+
+                // B2 = A3_t
+                B[row][i + 4] = a_4;
+                B[row][i + 5] = a_5;
+                B[row][i + 6] = a_6;
+                B[row][i + 7] = a_7;
+
+                // B2 = A2_t
+                B[row + 4][i + 0] = a_0;
+                B[row + 4][i + 1] = a_1;
+                B[row + 4][i + 2] = a_2;
+                B[row + 4][i + 3] = a_3;
+            }
+        }
+    }
+}
+
+```
+
+测试结果：
+`func 0 (Transpose submission): hits:10193, misses:2100, evictions:2068`
+
+### 优化2
+
+```c
+void trans_64x64_v2(int M, int N, int A[N][M], int B[M][N])
+{
+    int i, j, k;
+    for (i = 0; i < 64; i += 8) {
+        for (j = 0; j < 64; j += 8) {
+            for (k = 0; k < 4; k++) {
+                int row = i + k;
+
+                int a_0 = A[row][j + 0];
+                int a_1 = A[row][j + 1];
+                int a_2 = A[row][j + 2];
+                int a_3 = A[row][j + 3];
+                int a_4 = A[row][j + 4];
+                int a_5 = A[row][j + 5];
+                int a_6 = A[row][j + 6];
+                int a_7 = A[row][j + 7];
+
+                // B1 = A1_t
+                B[j + 0][row] = a_0;
+                B[j + 1][row] = a_1;
+                B[j + 2][row] = a_2;
+                B[j + 3][row] = a_3;
+
+                // B2 = A2_t
+                B[j + 0][row + 4] = a_4;
+                B[j + 1][row + 4] = a_5;
+                B[j + 2][row + 4] = a_6;
+                B[j + 3][row + 4] = a_7;
+            }
+
+            for (k = 0; k < 4; k++) {
+                int row = j + k;
+
+                // B2 = A2_t
+                int a_0 = B[row][i + 4];
+                int a_1 = B[row][i + 5];
+                int a_2 = B[row][i + 6];
+                int a_3 = B[row][i + 7];
+
+                // get A3_t
+                int a_4 = A[i + 4][row];
+                int a_5 = A[i + 5][row];
+                int a_6 = A[i + 6][row];
+                int a_7 = A[i + 7][row];
+
+                // B2 = A3_t
+                B[row][i + 4] = a_4;
+                B[row][i + 5] = a_5;
+                B[row][i + 6] = a_6;
+                B[row][i + 7] = a_7;
+
+                // B3 = A2_t
+                B[row + 4][i + 0] = a_0;
+                B[row + 4][i + 1] = a_1;
+                B[row + 4][i + 2] = a_2;
+                B[row + 4][i + 3] = a_3;
+            }
+
+            for (k = 0; k < 4; k++) {
+                int row = i + 4 + k;
+                int a_4 = A[row][j + 4];
+                int a_5 = A[row][j + 5];
+                int a_6 = A[row][j + 6];
+                int a_7 = A[row][j + 7];
+
+                B[j + 4][row] = a_4;
+                B[j + 5][row] = a_5;
+                B[j + 6][row] = a_6;
+                B[j + 7][row] = a_7;
+            }
+        }
+    }
+}
+```
+
 ## 61x67优化思路
+
+尝试了多个block size都能满足要求
+
+```c
+void trans_61x67(int M, int N, int A[N][M], int B[M][N])
+{
+    int i, j, k, n;
+    int block = 20;   // 17,18,19 20 are OK
+    for (i = 0; i < 61; i += block) {
+        for (j = 0; j < 67; j += block) {
+            for (k = i; k < i + block && k < 61; k++) {
+                for (n = j; n < j + block && n < 67; n++) {
+                    B[n][k] = A[k][n];
+                }
+            }
+        }
+    }
+}
+```
+
+block = 18测试结果
+
+`func 0 (Transpose submission): hits:6206, misses:1973, evictions:1941`
 
 # 遇到的问题
 
 - index\tag数据类型写太小，导致寻找cache set错误
 - 解析trace file 格式错误，导致解析结果很奇怪
-- 矩阵转置优化好难(哭)
+- 矩阵转置优化好难(哭). 分析完32x32就有点累了，64x64优化2参考了网上[别人的实现](https://zhuanlan.zhihu.com/p/484657229)，61x67纯属瞎试验的，结果好几个测试结果都满足要求
+- 增加makefile clean target对应的删除目标,删除一下编译产物
+  ```makefile
+	rm -f *.tmp hitf
+  ```
 
 # 附录
 
 32x32优化2 hift文件：
+
 ```txt
 S 18d08c,1 miss 
 L 18d0a0,8 miss 
@@ -456,4 +717,3 @@ S 14d31c,4 hit
 S 14d39c,4 hit 
 S 14d41c,4 miss eviction B[7][7]
 ```
-

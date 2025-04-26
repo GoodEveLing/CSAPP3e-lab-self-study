@@ -60,6 +60,179 @@ void trans_32x32_v2(int M, int N, int A[N][M], int B[M][N])
     }
 }
 
+void trans_64x64_v1(int M, int N, int A[N][M], int B[M][N])
+{
+    int i, j, k;
+    for (i = 0; i < 64; i += 8) {
+        for (j = 0; j < 64; j += 8) {
+            for (k = 0; k < 4; k++) {
+                int row = i + k;
+
+                int a_0 = A[row][j + 0];
+                int a_1 = A[row][j + 1];
+                int a_2 = A[row][j + 2];
+                int a_3 = A[row][j + 3];
+                int a_4 = A[row][j + 4];
+                int a_5 = A[row][j + 5];
+                int a_6 = A[row][j + 6];
+                int a_7 = A[row][j + 7];
+
+                // B 1 = A1_t
+                B[j + 0][row] = a_0;
+                B[j + 1][row] = a_1;
+                B[j + 2][row] = a_2;
+                B[j + 3][row] = a_3;
+                // B2 = A2_t
+                B[j + 0][row + 4] = a_4;
+                B[j + 1][row + 4] = a_5;
+                B[j + 2][row + 4] = a_6;
+                B[j + 3][row + 4] = a_7;
+            }
+
+            for (k = 0; k < 4; k++) {
+                int row = i + k;
+
+                int a_0 = A[row + 4][j + 0];
+                int a_1 = A[row + 4][j + 1];
+                int a_2 = A[row + 4][j + 2];
+                int a_3 = A[row + 4][j + 3];
+                int a_4 = A[row + 4][j + 4];
+                int a_5 = A[row + 4][j + 5];
+                int a_6 = A[row + 4][j + 6];
+                int a_7 = A[row + 4][j + 7];
+
+                // B3 = A3_t
+                B[j + 4][row] = a_0;
+                B[j + 5][row] = a_1;
+                B[j + 6][row] = a_2;
+                B[j + 7][row] = a_3;
+                // B4 = A4_t
+                B[j + 4][row + 4] = a_4;
+                B[j + 5][row + 4] = a_5;
+                B[j + 6][row + 4] = a_6;
+                B[j + 7][row + 4] = a_7;
+            }
+
+            for (k = 0; k < 4; k++) {
+                int row = j + k;
+
+                // B2 = A2_t
+                int a_0 = B[row][i + 4];
+                int a_1 = B[row][i + 5];
+                int a_2 = B[row][i + 6];
+                int a_3 = B[row][i + 7];
+
+                // B3 = A3_t
+                int a_4 = B[row + 4][i + 0];
+                int a_5 = B[row + 4][i + 1];
+                int a_6 = B[row + 4][i + 2];
+                int a_7 = B[row + 4][i + 3];
+
+                // B2 = A3_t
+                B[row][i + 4] = a_4;
+                B[row][i + 5] = a_5;
+                B[row][i + 6] = a_6;
+                B[row][i + 7] = a_7;
+
+                // B2 = A2_t
+                B[row + 4][i + 0] = a_0;
+                B[row + 4][i + 1] = a_1;
+                B[row + 4][i + 2] = a_2;
+                B[row + 4][i + 3] = a_3;
+            }
+        }
+    }
+}
+
+void trans_64x64_v2(int M, int N, int A[N][M], int B[M][N])
+{
+    int i, j, k;
+    for (i = 0; i < 64; i += 8) {
+        for (j = 0; j < 64; j += 8) {
+            for (k = 0; k < 4; k++) {
+                int row = i + k;
+
+                int a_0 = A[row][j + 0];
+                int a_1 = A[row][j + 1];
+                int a_2 = A[row][j + 2];
+                int a_3 = A[row][j + 3];
+                int a_4 = A[row][j + 4];
+                int a_5 = A[row][j + 5];
+                int a_6 = A[row][j + 6];
+                int a_7 = A[row][j + 7];
+
+                // B1 = A1_t
+                B[j + 0][row] = a_0;
+                B[j + 1][row] = a_1;
+                B[j + 2][row] = a_2;
+                B[j + 3][row] = a_3;
+
+                // B2 = A2_t
+                B[j + 0][row + 4] = a_4;
+                B[j + 1][row + 4] = a_5;
+                B[j + 2][row + 4] = a_6;
+                B[j + 3][row + 4] = a_7;
+            }
+
+            for (k = 0; k < 4; k++) {
+                int row = j + k;
+
+                // B2 = A2_t
+                int a_0 = B[row][i + 4];
+                int a_1 = B[row][i + 5];
+                int a_2 = B[row][i + 6];
+                int a_3 = B[row][i + 7];
+
+                // get A3_t
+                int a_4 = A[i + 4][row];
+                int a_5 = A[i + 5][row];
+                int a_6 = A[i + 6][row];
+                int a_7 = A[i + 7][row];
+
+                // B2 = A3_t
+                B[row][i + 4] = a_4;
+                B[row][i + 5] = a_5;
+                B[row][i + 6] = a_6;
+                B[row][i + 7] = a_7;
+
+                // B3 = A2_t
+                B[row + 4][i + 0] = a_0;
+                B[row + 4][i + 1] = a_1;
+                B[row + 4][i + 2] = a_2;
+                B[row + 4][i + 3] = a_3;
+            }
+
+            for (k = 0; k < 4; k++) {
+                int row = i + 4 + k;
+                int a_4 = A[row][j + 4];
+                int a_5 = A[row][j + 5];
+                int a_6 = A[row][j + 6];
+                int a_7 = A[row][j + 7];
+
+                B[j + 4][row] = a_4;
+                B[j + 5][row] = a_5;
+                B[j + 6][row] = a_6;
+                B[j + 7][row] = a_7;
+            }
+        }
+    }
+}
+
+void trans_61x67(int M, int N, int A[N][M], int B[M][N])
+{
+    int i, j, k, n;
+    int block = 20;   // 17,18,19 20 are OK
+    for (i = 0; i < 61; i += block) {
+        for (j = 0; j < 67; j += block) {
+            for (k = i; k < i + block && k < 61; k++) {
+                for (n = j; n < j + block && n < 67; n++) {
+                    B[n][k] = A[k][n];
+                }
+            }
+        }
+    }
+}
+
 /*
  * transpose_submit - This is the solution transpose function that you
  *     will be graded on for Part B of the assignment. Do not change
@@ -72,6 +245,12 @@ void transpose_submit(int M, int N, int A[N][M], int B[M][N])
 {
     if (M == 32 && N == 32) {
         trans_32x32_v2(M, N, A, B);
+    }
+    else if (M == 64 && N == 64) {
+        trans_64x64_v2(M, N, A, B);
+    }
+    else if (M == 67 && N == 61) {
+        trans_61x67(M, N, A, B);
     }
 }
 

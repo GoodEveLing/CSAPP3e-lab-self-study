@@ -8,7 +8,7 @@
 - [x] bomb lab
 - [x] attack lab 
 - [ ] arch lab （partA done）
-- [ ] cache lab
+- [x] cache lab
 - [x] shell lab
 - [x] malloc lab
 - [ ] proxy lab
