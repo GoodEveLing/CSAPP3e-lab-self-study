@@ -349,14 +349,14 @@ void trans_32x32_v2(int M, int N, int A[N][M], int B[M][N])
   |A1_t|A2_t|
   |----|----|
   |NULL|NULL|
+  
+  |A1_t|A2_t|
+  |----|----|
+  |A3_t|A4_t|
 
   |A1_t|A3_t|
   |----|----|
   |A2_t|A4_t|
-
-  |A1_t|A2_t|
-  |----|----|
-  |A3_t|A4_t|
 
 在exchange A2_t和A3_t会有cache冲突
 
@@ -449,6 +449,17 @@ void trans_64x64_v1(int M, int N, int A[N][M], int B[M][N])
 
 测试结果：
 `func 0 (Transpose submission): hits:10193, misses:2100, evictions:2068`
+
+**cache miss = 2100 分析？**
+
+对角线：
+8 Amiss + 8 Bmiss + 6(读B[i][i]miss) + exchange(2 read Bmiss + 2 load Bmiss) * 4 rows = 38 miss/bloc
+
+非对角线：
+8 + 8 + (2+2) * 4 = 32 miss/block
+
+38 * 8 block + 32 * 56 block = 2096 misses
+
 
 ### 优化2
 
