@@ -1,45 +1,10 @@
-#include <csapp.h>
+#include "csapp.h"
+#include "sbuf.h"
 #include <stdio.h>
 
 /* Recommended max cache and object sizes */
 #define MAX_CACHE_SIZE 1049000
 #define MAX_OBJECT_SIZE 102400
-
-/* You won't lose style points for including this long line in your code */
-static const char* user_agent_hdr =
-    "User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:10.0.3) Gecko/20120305 Firefox/10.0.3\r\n";
-
-void doit(int fd);
-void read_requesthdrs(rio_t* rp);
-int  parse_uri(char* uri, char* filename, char* cgiargs);
-void serve_static(int fd, char* filename, int filesize);
-void get_filetype(char* filename, char* filetype);
-void serve_dynamic(int fd, char* filename, char* cgiargs);
-void clienterror(int fd, char* cause, char* errnum, char* shortmsg, char* longmsg);
-
-int main(int argc, char** argv)
-{
-    int                     listenfd, connfd;
-    char                    hostname[MAXLINE], port[MAXLINE];
-    socklen_t               clientlen;
-    struct sockaddr_storage clientaddr;
-
-    /* Check command line args */
-    if (argc != 2) {
-        fprintf(stderr, "usage: %s <port>\n", argv[0]);
-        exit(1);
-    }
-
-    listenfd = Open_listenfd(argv[1]);
-    while (1) {
-        clientlen = sizeof(clientaddr);
-        connfd    = Accept(listenfd, (SA*)&clientaddr, &clientlen);   // line:netp:tiny:accept
-        Getnameinfo((SA*)&clientaddr, clientlen, hostname, MAXLINE, port, MAXLINE, 0);
-        printf("Accepted connection from (%s, %s)\n", hostname, port);
-        doit(connfd);    // line:netp:tiny:doit
-        Close(connfd);   // line:netp:tiny:close
-    }
-}
 
 typedef struct
 {
@@ -48,29 +13,117 @@ typedef struct
     char path[MAXLINE];
 } url_t;
 
-void build_header(char* data, url_t* url, rio_t* rio)
+/* You won't lose style points for including this long line in your code */
+static const char* user_agent_hdr =
+    "User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:10.0.3) Gecko/20120305 Firefox/10.0.3\r\n";
+
+void  doit(int fd);
+void  read_requesthdrs(rio_t* rp);
+void  parse_uri(char* uri, url_t* url);
+void  serve_static(int fd, char* filename, int filesize);
+void  get_filetype(char* filename, char* filetype);
+void  serve_dynamic(int fd, char* filename, char* cgiargs);
+void  clienterror(int fd, char* cause, char* errnum, char* shortmsg, char* longmsg);
+void* thread(void* vargp);
+
+#define NTHREADS 4    // 最大线程数
+#define SBUFSIZE 16   // 缓冲区大小
+
+sbuf_t sbuf;   // 连接描述符缓冲区
+
+int main(int argc, char** argv)
 {
-    char host[MAXLINE];
-    char line[MAXLINE];
-    char other[MAXLINE];
+    int                     listenfd, connfd;
+    char                    hostname[MAXLINE], port[MAXLINE];
+    socklen_t               clientlen;
+    struct sockaddr_storage clientaddr;
+    pthread_t               tid;
 
-    // 拼接一个HTTP请求 = 请求行 + 请求报头
-    sprintf(host, "HOST: %s\r\n", url->host);
-    while (Rio_readlineb(rio, line, MAXLINE) > 0) {
-        if (strcmp(line, "\r\n")) break;
-        if (strncmp(line, "HOST", 4) == 0) strcpy(host, line);   // replace host
-
-        if (strncmp(line, "User-Agent", 10) && strncmp(line, "Connection", 10) &&
-            strncmp(line, "Proxy-Connection", 16))
-            strcat(other, line);
+    /* Check command line args */
+    if (argc != 2) {
+        fprintf(stderr, "usage: %s <port>\n", argv[0]);
+        exit(1);
     }
 
-    sprintf(data,
-            "%s %s HTTP/1.0\r\n%s%sConnectionn: close\r\nProxy-Connection: close\r\n%s\r\n",
-            method,
-            url->path,
-            host,
-            other);
+    listenfd = Open_listenfd(argv[1]);
+
+    sbuf_init(&sbuf, SBUFSIZE);   // 初始化缓冲区
+
+    /* 创建工作线程 */
+    for (int i = 0; i < NTHREADS; i++) {
+        Pthread_create(&tid, NULL, thread, NULL);
+    }
+
+    while (1) {
+        clientlen = sizeof(clientaddr);
+        connfd    = Accept(listenfd, (SA*)&clientaddr, &clientlen);   // line:netp:tiny:accept
+        Getnameinfo((SA*)&clientaddr, clientlen, hostname, MAXLINE, port, MAXLINE, 0);
+        printf("Accepted connection from (%s, %s)\n", hostname, port);
+        sbuf_insert(&sbuf, connfd);   // 将信号缓冲区写入文件描述符
+        // doit(connfd);
+        // Close(connfd);
+    }
+
+    return 0;
+}
+
+void* thread(void* vargp)
+{
+    Pthread_detach(Pthread_self());
+    while (1) {
+        int connfd = sbuf_remove(&sbuf);   // remove connfd from buffer
+        doit(connfd);                      // service client
+        Close(connfd);
+    }
+}
+
+void gen_forward_msg(char* data, url_t* url, rio_t* rio)
+{
+    /*
+     根据url和rio，生成要转发的message，放在data中
+    */
+    char tmp[MAXLINE], getLine[MAXLINE], hostLine[MAXLINE];
+    char userAgentLine[MAXLINE], connectionLine[MAXLINE], proxyConnectionLine[MAXLINE];
+
+    // step1: 将转发信息的每一行进行单独组装
+    sprintf(getLine, "GET %s HTTP/1.0\r\n", url->path);
+    sprintf(hostLine, "Host: %s\r\n", url->host);
+    sprintf(userAgentLine, "User-Agent: %s", user_agent_hdr);
+    sprintf(connectionLine, "Connection: close\r\n");
+    sprintf(proxyConnectionLine, "Proxy-Connection: close\r\n");
+
+    // step2: 将每一行信息依次写到data中
+    char* ptr = data;
+    int   len;
+
+    len = snprintf(ptr, data + MAXLINE - ptr, "%s", getLine);
+    ptr += len;
+    len = snprintf(ptr, data + MAXLINE - ptr, "%s", hostLine);
+    ptr += len;
+    len = snprintf(ptr, data + MAXLINE - ptr, "%s", userAgentLine);
+    ptr += len;
+    len = snprintf(ptr, data + MAXLINE - ptr, "%s", connectionLine);
+    ptr += len;
+    len = snprintf(ptr, data + MAXLINE - ptr, "%s", proxyConnectionLine);
+    ptr += len;
+
+    // step3: 读取rio中的额外数据（剔除前面已经生成好的），并写入data中
+    Rio_readlineb(rio, tmp, MAXLINE);
+    while (strcmp(tmp, "\r\n")) {
+        if (!strncasecmp(tmp, "Host", strlen("Host")) ||
+            !strncasecmp(tmp, "User-Agent", strlen("User-Agent")) ||
+            !strncasecmp(tmp, "Connection", strlen("Connection")) ||
+            !strncasecmp(tmp, "Proxy-Connection", strlen("Proxy-Connection"))) {
+            if (Rio_readlineb(rio, tmp, MAXLINE) <= 0) break;
+            continue;
+        }
+        sprintf(ptr, tmp);
+        ptr += strlen(tmp);
+        if (Rio_readlineb(rio, tmp, MAXLINE) <= 0) break;
+    }
+
+    // step4: 最后要加上换行！
+    sprintf(ptr, "\r\n");
 }
 /*
  * doit - handle one HTTP request/response transaction
@@ -83,9 +136,10 @@ void doit(int fd)
     char  data[MAXLINE];
     char  buf[MAXLINE], method[MAXLINE], uri[MAXLINE], version[MAXLINE];
 
-    /* Read request line */
+    /* Read request line and parse it */
     Rio_readinitb(&rio, fd);
     if (!Rio_readlineb(&rio, buf, MAXLINE)) return;
+
     sscanf(buf, "%s %s %s", method, uri, version);
 
     if (strcasecmp(method, "GET")) {
@@ -94,8 +148,7 @@ void doit(int fd)
     }
     /* parse client request and generate a new request */
     parse_uri(uri, &url);
-
-    build_header(data, &url, &rio);
+    gen_forward_msg(data, &url, &rio);
 
     /* connect to server */
     int clientfd;
@@ -135,8 +188,15 @@ void read_requesthdrs(rio_t* rp)
 
 
 /* $begin parse_uri */
-int parse_uri(char* str, url_t* url)
+void parse_uri(char* str, url_t* url)
 {
+    /* 解析str的信息，填充到url中，包括hostname + port + path
+     e.g. str = "http://127.0.0.1:8080/webProject/index.html"
+     url->host = 127.0.0.1
+     url->port = 8080
+     url->path = /webProject/index.html
+     解析顺序是从后往前解析的， path -> port -> host
+    */
     // get the first place of '//'
     char* ptr = strstr(str, "//");
 
