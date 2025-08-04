@@ -11,4 +11,4 @@
 - [x] cache lab
 - [x] shell lab
 - [x] malloc lab
-- [ ] proxy lab (ing)
+- [x] proxy lab (ing)

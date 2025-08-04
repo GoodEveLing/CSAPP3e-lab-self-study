@@ -1,10 +1,33 @@
 #include "csapp.h"
 #include "sbuf.h"
+#include <stdint.h>
 #include <stdio.h>
 
 /* Recommended max cache and object sizes */
 #define MAX_CACHE_SIZE 1049000
 #define MAX_OBJECT_SIZE 102400
+
+typedef struct
+{
+    uint8_t  valid;                  // 是否有效
+    uint32_t time_stamp;             // 时间戳
+    char     url[MAXLINE];           // 缓存的url字符串
+    char     obj[MAX_OBJECT_SIZE];   // 缓存的url对应的对象
+    uint32_t obj_size;
+
+    uint8_t read_cnt;
+    sem_t   mutex;
+    sem_t   w;
+} cache_line_t;
+
+#define MAX_CACHE_LINES (10)
+
+typedef struct
+{
+    cache_line_t cache_line[MAX_CACHE_LINES];
+} cache_t;
+
+cache_t cache;
 
 typedef struct
 {
@@ -25,11 +48,14 @@ void  get_filetype(char* filename, char* filetype);
 void  serve_dynamic(int fd, char* filename, char* cgiargs);
 void  clienterror(int fd, char* cause, char* errnum, char* shortmsg, char* longmsg);
 void* thread(void* vargp);
+void  init_cache();
 
 #define NTHREADS 4    // 最大线程数
 #define SBUFSIZE 16   // 缓冲区大小
 
 sbuf_t sbuf;   // 连接描述符缓冲区
+
+static uint32_t current_time = 0;
 
 int main(int argc, char** argv)
 {
@@ -44,6 +70,8 @@ int main(int argc, char** argv)
         fprintf(stderr, "usage: %s <port>\n", argv[0]);
         exit(1);
     }
+
+    init_cache();
 
     listenfd = Open_listenfd(argv[1]);
 
@@ -65,6 +93,107 @@ int main(int argc, char** argv)
     }
 
     return 0;
+}
+
+#define read_lock(cache_idx)                                                              \
+    do {                                                                                  \
+        P(&cache.cache_line[cache_idx].mutex);                                            \
+        cache.cache_line[cache_idx].read_cnt++;                                           \
+        if (cache.cache_line[cache_idx].read_cnt == 1) P(&cache.cache_line[cache_idx].w); \
+        V(&cache.cache_line[cache_idx].mutex);                                            \
+    } while (0);
+
+
+#define read_unlock(cache_idx)                                                            \
+    do {                                                                                  \
+        P(&cache.cache_line[cache_idx].mutex);                                            \
+        cache.cache_line[cache_idx].read_cnt--;                                           \
+        if (cache.cache_line[cache_idx].read_cnt == 0) V(&cache.cache_line[cache_idx].w); \
+        V(&cache.cache_line[cache_idx].mutex);                                            \
+    } while (0);
+
+#define write_lock(cache_idx)              \
+    do {                                   \
+        P(&cache.cache_line[cache_idx].w); \
+    } while (0);
+
+#define write_unlock(cache_idx)            \
+    do {                                   \
+        V(&cache.cache_line[cache_idx].w); \
+    } while (0);
+
+void init_cache()
+{
+    memset((void*)&cache, 0, sizeof(cache));
+
+    for (uint8_t i = 0; i < MAX_CACHE_LINES; i++) {
+        cache.cache_line[i].read_cnt = 0;
+        Sem_init(&cache.cache_line[i].mutex, 0, 1);
+        Sem_init(&cache.cache_line[i].w, 0, 1);
+    }
+}
+
+int cache_read(char* url)
+{
+    int cache_idx = -1;
+
+    for (uint8_t i = 0; i < MAX_CACHE_LINES; i++) {
+        read_lock(i);
+        if (cache.cache_line[i].valid && !strcmp(cache.cache_line[i].url, url)) {
+            cache_idx = i;
+            break;
+        }
+        read_unlock(i);
+    }
+
+    return cache_idx;
+}
+
+void update_cache_line(char* url, char* content, uint32_t size, uint32_t line_index)
+{
+    write_lock(line_index);
+
+    strcpy(&(cache.cache_line[line_index].url), url);
+    strcpy(&(cache.cache_line[line_index].obj), content);
+    cache.cache_line[line_index].valid      = 1;
+    cache.cache_line[line_index].time_stamp = current_time;
+    cache.cache_line[line_index].obj_size   = size;
+
+    write_unlock(line_index);
+}
+
+void cache_write(char* url, char* content, uint32_t size)
+{
+    if (size > MAX_OBJECT_SIZE) return;
+
+    int empty_cache_idx = -1;
+
+    current_time++;
+    for (uint8_t i = 0; i < MAX_CACHE_LINES; i++) {
+        if (cache.cache_line[i].valid == 0) {
+            empty_cache_idx = i;
+            break;
+        }
+    }
+
+    if (empty_cache_idx == -1) {
+        int evict_cache_idx = -1;
+        // empty line not existed
+        // all cache line are valid, but no hit. We need to evict one line by LRU.
+
+        uint32_t min_time = INT32_MAX;
+        for (uint32_t i = 0; i < MAX_CACHE_LINES; i++) {
+            if (min_time > cache.cache_line[i].time_stamp) {
+                evict_cache_idx = i;
+                min_time        = cache.cache_line[i].time_stamp;
+            }
+        }
+
+        update_cache_line(url, content, size, evict_cache_idx);
+    }
+    else {
+        update_cache_line(url, content, size, empty_cache_idx);
+    }
 }
 
 void* thread(void* vargp)
@@ -135,17 +264,33 @@ void doit(int fd)
     url_t url;
     char  data[MAXLINE];
     char  buf[MAXLINE], method[MAXLINE], uri[MAXLINE], version[MAXLINE];
+    char  uriBackup[MAXLINE];
 
     /* Read request line and parse it */
     Rio_readinitb(&rio, fd);
     if (!Rio_readlineb(&rio, buf, MAXLINE)) return;
 
     sscanf(buf, "%s %s %s", method, uri, version);
+    strcpy(uriBackup, uri);
 
     if (strcasecmp(method, "GET")) {
         printf("Proxy does not implement the method");
         return;
     }
+
+    int cache_idx = cache_read(uri);
+    // 从缓存中读取请求对象
+    if (cache_idx != -1) {
+        read_lock(cache_idx);
+
+        // 将缓存中的对象返回给客户端
+        Rio_writen(fd, cache.cache_line[cache_idx].obj, cache.cache_line[cache_idx].obj_size);
+
+        read_unlock(cache_idx);
+        printf("Get resource from cache\n");
+        return;
+    }
+
     /* parse client request and generate a new request */
     parse_uri(uri, &url);
     gen_forward_msg(data, &url, &rio);
@@ -161,10 +306,22 @@ void doit(int fd)
     Rio_writen(clientfd, data, sizeof(data));
 
     // response to client
+    size_t buf_size                   = 0;
+    char   cache_buf[MAX_OBJECT_SIZE] = {0};
+
     int len;
-    while ((len = Rio_readlineb(&rio, buf, MAXLINE)) > 0) Rio_writen(fd, buf, len);
+    while ((len = Rio_readlineb(&rio, buf, MAXLINE)) > 0) {
+        buf_size += len;
+        strcat(cache_buf, buf);
+        printf("proxy received %d bytes,then send\n", len);
+        Rio_writen(fd, buf, len);
+    }
 
     Close(clientfd);
+
+    if (buf_size < MAX_OBJECT_SIZE) {
+        cache_write(uriBackup, cache_buf, buf_size);
+    }
 }
 /* $end doit */
 

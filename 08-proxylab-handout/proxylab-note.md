@@ -44,13 +44,13 @@ make
   - request line `method URI verison`
   - request header `header-name: header-data`
 - URI和URL的区别？
-  https://zhuanlan.zhihu.com/p/38120321
+  <https://zhuanlan.zhihu.com/p/38120321>
   URL(uniform resource locator)：它是对可以从互联网上得到的资源的位置和访问方法的一种简洁的表示，是互联网上标准资源的地址。
   - URL的格式一般由下列三部分组成：
     1. 协议(或称为服务方式);
     2. 存有该资源所在的服务器的名称或IP地址(包括端口号);
     3. 主机资源的具体地址。
-  e.g. URL:  http://127.0.0.1:8080/webProject/index.html 
+  e.g. URL:  <http://127.0.0.1:8080/webProject/index.html>
 
   URI(uniform resource identifier)： 用来标识抽象或物理资源。Web上可用的每种资源（ HTML文档、图像、音频、视频片段、程序等）都由一个通用资源标识符（Uniform Resource Identifier, 简称”URI”）进行定位。
   - URI的格式也由三部分组成：
@@ -77,7 +77,7 @@ make
 1. 处理器发送HTTP GET 请求给代理器:
    `GET http://www.cmu.edu/hub/index.html HTTP/1.1`
    - GET 请求method
-   - host name: http://www.cmu.edu
+   - host name: <http://www.cmu.edu>
    - 请求资源路径：/hub/index.html
    - HTTP 版本是1.1
 2. proxy解析请求，得到hostname + path / query，然后打开一个连接到host，并且发送HTTP request。代理转发请求行如下，以'\r\n'结尾：
@@ -88,11 +88,10 @@ make
    [optional] `User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:10.0.12) Gecko/20100101 Firefox/10.0.12`
    [required] `Connection: close`
    [required] `Proxy-Connection: close`
-   
+
 ## debug
 
 可以先直接访问tiny server，看看正确的结果是什么样
-
 
 1. 选择可以用的端口
 
@@ -187,7 +186,6 @@ Accept: */*
 
 > 使用代理服务器的结果应该要和上面一样
 > 需要一个终端运行tiny server，另一个终端再运行proxy，然后通过curl发送请求给proxy server,让proxy server转发请求给tiny server
-
 
 ## 关键实现
 
@@ -335,12 +333,13 @@ Timeout waiting for the server to grab the port reserved for it
 > 实现并发服务器的最简单方法是生成一个新线程来处理每个新连接请求。
 > 其他设计也是可能的,例如在第 12.5.5 节中描述的预线程服务器。
 > 注意：
+>
 > - 您的线程应该以分离模式运行,以避免内存泄漏。
 > - CS:APP3e 教科书中描述的 open clientfd 和 open listengfd 函数是基于现代协议独立的 getaddrinfo 函数,因此线程安全。
 > 阅读第12章并发编程的内容
 
-
 如何构造一个并发服务器？
+
 - 父进程接收客户端的连接请求，并创建子进程处理每个请求
 - IO多路复用
 - **多线程**
@@ -348,14 +347,16 @@ Timeout waiting for the server to grab the port reserved for it
 **参考page709 实现并发服务器**，其中sbuf可以用copy 这里的文件[sbuf.h](https://csapp.cs.cmu.edu/3e/ics3/code/conc/sbuf.h) + [sbuf.c](https://csapp.cs.cmu.edu/3e/ics3/code/conc/sbuf.c)
 
 makefile修改如下：
+
 ```makefile
 sbuf.o: sbuf.c sbuf.h
-	$(CC) $(CFLAGS) -c sbuf.c
+ $(CC) $(CFLAGS) -c sbuf.c
 
 proxy: proxy.o csapp.o sbuf.o
-	$(CC) $(CFLAGS) proxy.o csapp.o sbuf.o -o proxy $(LDFLAGS)
+ $(CC) $(CFLAGS) proxy.o csapp.o sbuf.o -o proxy $(LDFLAGS)
 
 ```
+
 ## 关键实现
 
 ```c
@@ -415,12 +416,11 @@ void* thread(void* vargp)
 
 ```
 
-
 ## 遇到bug
 
 ![alt text](image-1.png)
 
-按照https://zhuanlan.zhihu.com/p/497982541 的方法，将driver.sh脚本中line 301 的`./nop-server.py`改为`python3 nop-server.py`就能解决了。
+按照<https://zhuanlan.zhihu.com/p/497982541> 的方法，将driver.sh脚本中line 301 的`./nop-server.py`改为`python3 nop-server.py`就能解决了。
 
 ## 运行结果
 
@@ -441,11 +441,295 @@ concurrencyScore: 15/15
 # partIII - 缓存web对象
 
 > 在实验的最后一部分，你需要为代理服务器添加一个缓存功能，用于在内存中存储最近使用过的 Web 对象。HTTP 协议实际上定义了一个相当复杂的模型，Web 服务器可以通过该模型给出关于其提供的对象应如何被缓存的指令，客户端也可以指定缓存应如何代表它们进行操作。不过，你的代理服务器将采用一种简化的方式。
-> 
+>
 > 当你的代理服务器从服务器接收到一个 Web 对象时，它应该在将该对象传输给客户端的同时，把它缓存到内存中。如果另一个客户端从同一服务器请求同一个对象，你的代理服务器无需重新连接到该服务器，只需重新发送缓存的对象即可。
-> 
+>
 > 显然，如果你的代理服务器要缓存所有曾经被请求过的对象，就需要无限量的内存。此外，由于有些 Web 对象比其他对象大，可能会出现一个巨大的对象占用整个缓存的情况，从而完全阻止其他对象被缓存。为了避免这些问题，你的代理服务器应该同时设置最大缓存大小和最大缓存对象大小。
 
 **最大缓存大小：1 MB**
 
 **最大缓存对象大小：100 KB**
+
+## 关键问题
+
+### cache实现
+
+在cache lab中有类似实现
+
+### 同步访问
+>
+> **对缓存的访问必须是线程安全的，而确保缓存访问不存在竞态条件**
+> 事实上，这里有一个特殊要求：多个线程必须能够同时从缓存中读取数据。当然，同一时间只允许一个线程向缓存写入数据，但这个限制不能适用于读取操作。
+>
+> 因此，用一个大型排他锁来保护对缓存的访问，并不是一个可接受的解决方案。你可以考虑一些方案，比如**对缓存进行分区、使用 Pthreads 读写锁，或者使用信号量来实现自己的读写方案**。无论采用哪种方式，由于你不必实现严格的 LRU（最近最少使用）淘汰策略，这会让你在支持多读者的实现上拥有一定的灵活性。
+
+page 706-707描述了这种读者-写者问题。提供了一种读优先的代码：
+
+```c
+int read_cnt;      // 初始化为0
+sem_t mutex, w;    // 都初始化为1
+
+void reader(void) 
+{
+    while(1){
+        P(&mutex);
+        readcnt++;
+        if(readcnt==1)
+            P(&w);
+        V(&mutex);
+        
+        P(&mutex);
+        readcnt--;
+        if(readcnt==0)
+            V(&w);
+        V(&mutex);
+    }
+}
+
+void writer(void)
+{
+ while(1){
+        P(&w);
+        
+        ...
+        
+        V(&w);
+    }
+}
+```
+
+- mutex保护read_cnt变量，w保护写操作。
+- 只有第一个reader 使用 w 资源，最后一个reader会释放 w 资源，表示在读期间不允许写操作。
+- 当没有读操作时，writer 才可以开始写。
+
+### 信号量的使用
+
+page702描述了信号量的使用, Posix标准定义了许多信号量的函数：
+
+```c
+void P(sem_t *sem); // wrapper func for sem_wait
+void V(sem_t *sem); // wrapper func for sem_post
+```
+
+- P 操作：取自荷兰语 “Passeren”（通过），表示进程请求获取资源
+- V 操作：取自荷兰语 “Vrijgeven”（释放），表示进程释放资源
+
+- 具体含义：
+
+  - P 操作（等待操作）
+    - 执行时会将信号量的值减 1
+    - 如果结果大于等于 0，当前进程可以继续执行（表示获取到资源）
+    - 如果结果小于 0，当前进程会被阻塞，并放入该信号量的等待队列
+  - V 操作（释放操作）
+    - 执行时会将信号量的值加 1
+    - 如果结果大于 0，当前进程继续执行（表示没有进程在等待该资源）
+    - 如果结果小于等于 0，会从该信号量的等待队列中唤醒一个进程，让其继续执行
+
+通俗理解：
+可以把信号量想象成 "资源计数器"：
+
+- P 操作："我要使用一个资源"（计数器减 1）
+- V 操作："我用完资源了"（计数器加 1）
+
+当计数器为 0 时，再执行 P 操作的进程会被阻塞，直到有其他进程执行 V 操作释放资源。
+
+## 关键实现
+
+### cache实现
+
+#### cache缓存结构
+
+```c
+typedef struct
+{
+    uint8_t  valid;                  // 是否有效
+    uint32_t time_stamp;             // 时间戳
+    char     url[MAXLINE];           // 缓存的url字符串
+    char     obj[MAX_OBJECT_SIZE];   // 缓存的url对应的对象
+    uint32_t obj_size;
+
+    uint8_t read_cnt;
+    sem_t   mutex;
+    sem_t   w;
+} cache_line_t;
+
+#define MAX_CACHE_LINES (10)
+
+typedef struct
+{
+    cache_line_t cache_line[MAX_CACHE_LINES];
+} cache_t;
+
+cache_t cache;
+```
+#### cache 操作
+
+考虑到访问缓存同步的问题，将读写缓存加锁和释放锁的操作抽象为宏
+```c
+#define read_lock(cache_idx)                                                              \
+    do {                                                                                  \
+        P(&cache.cache_line[cache_idx].mutex);                                            \
+        cache.cache_line[cache_idx].read_cnt++;                                           \
+        if (cache.cache_line[cache_idx].read_cnt == 1) P(&cache.cache_line[cache_idx].w); \
+        V(&cache.cache_line[cache_idx].mutex);                                            \
+    } while (0);
+
+
+#define read_unlock(cache_idx)                                                            \
+    do {                                                                                  \
+        P(&cache.cache_line[cache_idx].mutex);                                            \
+        cache.cache_line[cache_idx].read_cnt--;                                           \
+        if (cache.cache_line[cache_idx].read_cnt == 0) V(&cache.cache_line[cache_idx].w); \
+        V(&cache.cache_line[cache_idx].mutex);                                            \
+    } while (0);
+
+#define write_lock(cache_idx)              \
+    do {                                   \
+        P(&cache.cache_line[cache_idx].w); \
+    } while (0);
+
+#define write_unlock(cache_idx)            \
+    do {                                   \
+        V(&cache.cache_line[cache_idx].w); \
+    } while (0);
+
+```
+
+cache的初始化, 该函数需要再启用代理服务器之前就调用一次
+```c
+void init_cache()
+{
+    memset((void*)&cache, 0, sizeof(cache));
+
+    for (uint8_t i = 0; i < MAX_CACHE_LINES; i++) {
+        cache.cache_line[i].read_cnt = 0;
+        Sem_init(&cache.cache_line[i].mutex, 0, 1);
+        Sem_init(&cache.cache_line[i].w, 0, 1);
+    }
+}
+```
+
+```c
+
+int cache_read(char* url)
+{
+    int cache_idx = -1;
+
+    for (uint8_t i = 0; i < MAX_CACHE_LINES; i++) {
+        read_lock(i);
+        if (cache.cache_line[i].valid && !strcmp(cache.cache_line[i].url, url)) {
+            cache_idx = i;
+            break;
+        }
+        read_unlock(i);
+    }
+
+    return cache_idx;
+}
+
+void update_cache_line(char* url, char* content, uint32_t size, uint32_t line_index)
+{
+    write_lock(line_index);
+
+    strcpy(&(cache.cache_line[line_index].url), url);
+    strcpy(&(cache.cache_line[line_index].obj), content);
+    cache.cache_line[line_index].valid      = 1;
+    cache.cache_line[line_index].time_stamp = current_time;
+    cache.cache_line[line_index].obj_size   = size;
+
+    write_unlock(line_index);
+}
+
+void cache_write(char* url, char* content, uint32_t size)
+{
+    if (size > MAX_OBJECT_SIZE) return;
+
+    int empty_cache_idx = -1;
+
+    current_time++;
+    for (uint8_t i = 0; i < MAX_CACHE_LINES; i++) {
+        if (cache.cache_line[i].valid == 0) {
+            empty_cache_idx = i;
+            break;
+        }
+    }
+
+    if (empty_cache_idx == -1) {
+        int evict_cache_idx = -1;
+        // empty line not existed
+        // all cache line are valid, but no hit. We need to evict one line by LRU.
+
+        uint32_t min_time = INT32_MAX;
+        for (uint32_t i = 0; i < MAX_CACHE_LINES; i++) {
+            if (min_time > cache.cache_line[i].time_stamp) {
+                evict_cache_idx = i;
+                min_time        = cache.cache_line[i].time_stamp;
+            }
+        }
+
+        update_cache_line(url, content, size, evict_cache_idx);
+    }
+    else {
+        update_cache_line(url, content, size, empty_cache_idx);
+    }
+}
+```
+### 代理服务器拿到缓存内容后如何返回给客户端？
+
+先访问缓存，如果缓存中没有，则访问服务器，并把结果写入缓存；如果有就将缓存中的内容返回给客户端。
+
+```c
+    int cache_idx = cache_read(uri);
+    // 从缓存中读取请求对象
+    if (cache_idx != -1) {
+        read_lock(cache_idx);
+
+        // 将缓存中的对象返回给客户端
+        Rio_writen(fd, cache.cache_line[cache_idx].obj, cache.cache_line[cache_idx].obj_size);
+
+        read_unlock(cache_idx);
+        printf("Get resource from cache\n");
+        return;
+    }
+```
+
+### 代理服务器何时更新缓存？
+
+即，先访问缓存，如果缓存中没有，则访问服务器，并把结果写入缓存。
+
+```c
+    // response to client
+    size_t buf_size                   = 0;
+    char   cache_buf[MAX_OBJECT_SIZE] = {0};
+
+    int len;
+    while ((len = Rio_readlineb(&rio, buf, MAXLINE)) > 0) {
+        buf_size += len;
+        strcat(cache_buf, buf);
+        printf("proxy received %d bytes,then send\n", len);
+        Rio_writen(fd, buf, len);
+    }
+
+    Close(clientfd);
+
+    if (buf_size < MAX_OBJECT_SIZE) {
+        cache_write(uriBackup, cache_buf, buf_size);
+    }
+```
+## 测试结果
+
+```bash
+*** Cache ***
+Starting tiny on port 3311
+Starting proxy on port 19575
+Fetching ./tiny/tiny.c into ./.proxy using the proxy
+Fetching ./tiny/home.html into ./.proxy using the proxy
+Fetching ./tiny/csapp.c into ./.proxy using the proxy
+Killing tiny
+Fetching a cached copy of ./tiny/home.html into ./.noproxy
+Success: Was able to fetch tiny/home.html from the cache.
+Killing proxy
+cacheScore: 15/15
+
+totalScore: 70/70
+```
